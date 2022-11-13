@@ -211,6 +211,31 @@ impl FromStr for ByteSized {
     }
 }
 
+pub struct ByteSizedList(pub Vec<u64>);
+
+#[derive(Debug)]
+pub enum ByteSizedListParseError {
+    InvalidValue(String),
+}
+
+impl FromStr for ByteSizedList {
+    type Err = ByteSizedListParseError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(ByteSizedList(
+            s.trim()
+                .trim_matches(|c| c == '[' || c == ']')
+                .split(',')
+                .map(ByteSized::from_str)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| ByteSizedListParseError::InvalidValue(s.to_owned()))?
+                .iter()
+                .map(|v| v.0)
+                .collect(),
+        ))
+    }
+}
+
 pub struct IntegerList(pub Vec<u64>);
 
 pub enum IntegerListParseError {
