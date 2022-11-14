@@ -283,7 +283,7 @@ fn resize_command(
     api_socket: &str,
     desired_vcpus: Option<u8>,
     desired_ram: Option<usize>,
-    desired_balloon: Option<usize>,
+    desired_balloon: Option<[usize; 2]>,
     event_file: Option<&str>,
 ) -> bool {
     let mut cmd = Command::new(clh_command("ch-remote"));
@@ -298,7 +298,7 @@ fn resize_command(
     }
 
     if let Some(desired_balloon) = desired_balloon {
-        cmd.arg(format!("--balloon={}", desired_balloon));
+        cmd.arg(format!("--balloon={:?}", desired_balloon));
     }
 
     let ret = cmd.status().expect("Failed to launch ch-remote").success();
@@ -4570,7 +4570,7 @@ mod common_parallel {
 
             // Use balloon to remove RAM from the VM
             let desired_balloon = 512 << 20;
-            resize_command(&api_socket, None, None, Some(desired_balloon), None);
+            resize_command(&api_socket, None, None, Some([desired_balloon, 0]), None);
 
             thread::sleep(std::time::Duration::new(10, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
@@ -4582,7 +4582,7 @@ mod common_parallel {
 
             // Use balloon add RAM to the VM
             let desired_balloon = 0;
-            resize_command(&api_socket, None, None, Some(desired_balloon), None);
+            resize_command(&api_socket, None, None, Some([desired_balloon, 0]), None);
 
             thread::sleep(std::time::Duration::new(10, 0));
 
@@ -5724,7 +5724,7 @@ mod common_parallel {
                     &api_socket_source,
                     None,
                     None,
-                    Some(1 << 30),
+                    Some([1 << 30, 0]),
                     Some(&event_path),
                 );
                 thread::sleep(std::time::Duration::new(5, 0));
@@ -5898,7 +5898,7 @@ mod common_parallel {
                 assert!(total_memory > 4_800_000);
                 assert!(total_memory < 5_760_000);
                 // Deflate balloon to restore entire RAM to the VM
-                resize_command(&api_socket_restored, None, None, Some(0), None);
+                resize_command(&api_socket_restored, None, None, Some([0; 2]), None);
                 thread::sleep(std::time::Duration::new(5, 0));
                 assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
                 // Decrease guest RAM with virtio-mem
@@ -8585,7 +8585,7 @@ mod live_migration {
             thread::sleep(std::time::Duration::new(5, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
             // Use balloon to remove RAM from the VM
-            resize_command(&src_api_socket, None, None, Some(1 << 30), None);
+            resize_command(&src_api_socket, None, None, Some([1 << 30, 0]), None);
             thread::sleep(std::time::Duration::new(5, 0));
             let total_memory = guest.get_total_memory().unwrap_or_default();
             assert!(total_memory > 4_800_000);
@@ -8665,7 +8665,7 @@ mod live_migration {
             assert!(total_memory > 4_800_000);
             assert!(total_memory < 5_760_000);
             // Deflate balloon to restore entire RAM to the VM
-            resize_command(&dest_api_socket, None, None, Some(0), None);
+            resize_command(&dest_api_socket, None, None, Some([0; 2]), None);
             thread::sleep(std::time::Duration::new(5, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
             // Decrease guest RAM with virtio-mem

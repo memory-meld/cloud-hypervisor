@@ -11,7 +11,7 @@ use api_client::simple_api_command_with_fds;
 use api_client::simple_api_full_command;
 use api_client::Error as ApiClientError;
 use clap::{Arg, ArgAction, ArgMatches, Command};
-use option_parser::{ByteSized, ByteSizedParseError};
+use option_parser::{ByteSized, ByteSizedList, ByteSizedListParseError, ByteSizedParseError};
 use std::fmt;
 use std::io::Read;
 use std::os::unix::net::UnixStream;
@@ -23,7 +23,7 @@ enum Error {
     ApiClient(ApiClientError),
     InvalidCpuCount(std::num::ParseIntError),
     InvalidMemorySize(ByteSizedParseError),
-    InvalidBalloonSize(ByteSizedParseError),
+    InvalidBalloonSize(ByteSizedListParseError),
     AddDeviceConfig(vmm::config::Error),
     AddDiskConfig(vmm::config::Error),
     AddFsConfig(vmm::config::Error),
@@ -84,12 +84,14 @@ fn resize_api_command(
         None
     };
 
-    let desired_balloon: Option<u64> = if let Some(balloon) = balloon {
+    let desired_balloon: Option<[u64; 2]> = if let Some(balloon) = balloon {
         Some(
             balloon
-                .parse::<ByteSized>()
+                .parse::<ByteSizedList>()
                 .map_err(Error::InvalidBalloonSize)?
-                .0,
+                .0
+                .try_into()
+                .unwrap_or([0; 2]),
         )
     } else {
         None

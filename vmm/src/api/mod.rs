@@ -172,7 +172,7 @@ pub struct VmmPingResponse {
 pub struct VmResizeData {
     pub desired_vcpus: Option<u8>,
     pub desired_ram: Option<u64>,
-    pub desired_balloon: Option<u64>,
+    pub desired_balloon: Option<[u64; 2]>,
 }
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]

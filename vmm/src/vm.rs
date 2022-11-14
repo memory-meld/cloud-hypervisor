@@ -1259,7 +1259,7 @@ impl Vm {
         &mut self,
         desired_vcpus: Option<u8>,
         desired_memory: Option<u64>,
-        desired_balloon: Option<u64>,
+        desired_balloon: Option<[u64; 2]>,
     ) -> Result<()> {
         event!("vm", "resizing");
 

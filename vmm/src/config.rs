@@ -6,7 +6,8 @@
 pub use crate::vm_config::*;
 use clap::ArgMatches;
 use option_parser::{
-    ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple,
+    ByteSized, ByteSizedList, IntegerList, OptionParser, OptionParserError, StringList, Toggle,
+    Tuple,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
@@ -155,7 +156,7 @@ pub enum ValidationError {
     /// Invalid PCI segment id
     InvalidPciSegment(u16),
     /// Balloon too big
-    BalloonLargerThanRam(u64, u64),
+    BalloonLargerThanRam([u64; 2], u64),
     /// On a IOMMU segment but not behind IOMMU
     OnIommuSegment(u16),
     // On a IOMMU segment but IOMMU not suported
@@ -248,7 +249,7 @@ impl fmt::Display for ValidationError {
             BalloonLargerThanRam(balloon_size, ram_size) => {
                 write!(
                     f,
-                    "Ballon size ({}) greater than RAM ({})",
+                    "Ballon size ({:?}) greater than RAM ({})",
                     balloon_size, ram_size
                 )
             }
@@ -1230,21 +1231,31 @@ impl RngConfig {
 
 impl BalloonConfig {
     pub const SYNTAX: &'static str =
-        "Balloon parameters \"size=<balloon_size>,deflate_on_oom=on|off,\
-        free_page_reporting=on|off\"";
+        "Balloon parameters \"size=<balloon_size>,statistics=on|off,deflate_on_oom=on|off,\
+        free_page_reporting=on|off,heterogeneous_memory=on|off\"";
 
     pub fn parse(balloon: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("size");
+        parser.add("statistics");
         parser.add("deflate_on_oom");
         parser.add("free_page_reporting");
+        parser.add("heterogeneous_memory");
         parser.parse(balloon).map_err(Error::ParseBalloon)?;
 
         let size = parser
-            .convert::<ByteSized>("size")
+            .convert::<ByteSizedList>("size")
             .map_err(Error::ParseBalloon)?
             .map(|v| v.0)
-            .unwrap_or(0);
+            .unwrap_or_default()
+            .try_into()
+            .unwrap_or([0; 2]);
+
+        let statistics = parser
+            .convert::<Toggle>("statistics")
+            .map_err(Error::ParseBalloon)?
+            .unwrap_or(Toggle(false))
+            .0;
 
         let deflate_on_oom = parser
             .convert::<Toggle>("deflate_on_oom")
@@ -1258,10 +1269,18 @@ impl BalloonConfig {
             .unwrap_or(Toggle(false))
             .0;
 
+        let heterogeneous_memory = parser
+            .convert::<Toggle>("heterogeneous_memory")
+            .map_err(Error::ParseBalloon)?
+            .unwrap_or(Toggle(false))
+            .0;
+
         Ok(BalloonConfig {
             size,
+            statistics,
             deflate_on_oom,
             free_page_reporting,
+            heterogeneous_memory,
         })
     }
 }
@@ -1964,7 +1983,7 @@ impl VmConfig {
                 }
             }
 
-            if balloon.size >= ram_size {
+            if balloon.size.iter().sum::<u64>() >= ram_size {
                 return Err(ValidationError::BalloonLargerThanRam(
                     balloon.size,
                     ram_size,
