@@ -953,7 +953,7 @@ impl Vmm {
         &mut self,
         desired_vcpus: Option<u8>,
         desired_ram: Option<u64>,
-        desired_balloon: Option<u64>,
+        desired_balloon: Option<[u64; 2]>,
     ) -> result::Result<(), VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 

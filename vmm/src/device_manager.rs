@@ -2979,8 +2979,10 @@ impl DeviceManager {
                 virtio_devices::Balloon::new(
                     id.clone(),
                     balloon_config.size,
+                    balloon_config.statistics,
                     balloon_config.deflate_on_oom,
                     balloon_config.free_page_reporting,
+                    balloon_config.heterogeneous_memory,
                     self.seccomp_action.clone(),
                     self.exit_evt
                         .try_clone()
@@ -4238,7 +4240,7 @@ impl DeviceManager {
         counters
     }
 
-    pub fn resize_balloon(&mut self, size: u64) -> DeviceManagerResult<()> {
+    pub fn resize_balloon(&mut self, size: [u64; 2]) -> DeviceManagerResult<()> {
         if let Some(balloon) = &self.balloon {
             return balloon
                 .lock()

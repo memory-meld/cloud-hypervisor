@@ -46,17 +46,27 @@ const MIN_NUM_QUEUES: usize = 2;
 const INFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 // Deflate virtio queue event.
 const DEFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
+// Memory statistics virtio queue event.
+const STATS_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 // Reporting virtio queue event.
-const REPORTING_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
+const REPORTING_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
+// Heterogeneous inflate virtio queue event.
+const HETERO_INFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
+// Heterogeneous deflate virtio queue event.
+const HETERO_DEFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 6;
 
 // Size of a PFN in the balloon interface.
 const VIRTIO_BALLOON_PFN_SHIFT: u64 = 12;
 
+// Memory statistics virtqueue
+const VIRTIO_BALLOON_F_STATS_VQ: u64 = 1;
 // Deflate balloon on OOM
 const VIRTIO_BALLOON_F_DEFLATE_ON_OOM: u64 = 2;
 // Enable an additional virtqueue to let the guest notify the host about free
 // pages.
 const VIRTIO_BALLOON_F_REPORTING: u64 = 5;
+// Enable an additional pair of inflate and deflate virtqueues to handle ballooning of heterogeneous memory
+const VIRTIO_BALLOON_F_HETERO_MEM: u64 = 6;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -92,9 +102,19 @@ pub struct VirtioBalloonConfig {
     num_pages: u32,
     // Number of pages we've actually got in balloon.
     actual: u32,
+    // Free page hinting to speed up migration (this feature is not implemented).
+    // Caveat: should not be mixed with free page reporting
+    hint_cmd_id: u32,
+    // Deflated or reported free pages are initialized with this value (this feature is not implemented).
+    poison_val: u32,
+    // Number of heterogeneous pages host wants Guest to give up.
+    num_hetero_pages: u32,
+    // Number of heterogeneous pages we've actually got in balloon.
+    hetero_actual: u32,
 }
 
 const CONFIG_ACTUAL_OFFSET: u64 = 4;
+const CONFIG_HETERO_ACTUAL_OFFSET: u64 = 16;
 const CONFIG_ACTUAL_SIZE: usize = 4;
 
 // SAFETY: it only has data and has no implicit padding.
@@ -106,7 +126,10 @@ struct BalloonEpollHandler {
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     inflate_queue_evt: EventFd,
     deflate_queue_evt: EventFd,
+    stats_queue_evt: Option<EventFd>,
     reporting_queue_evt: Option<EventFd>,
+    hetero_inflate_queue_evt: Option<EventFd>,
+    hetero_deflate_queue_evt: Option<EventFd>,
     kill_evt: EventFd,
     pause_evt: EventFd,
 }
@@ -196,19 +219,21 @@ impl BalloonEpollHandler {
                 let range_base = GuestAddress((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT);
                 let range_len = 1 << VIRTIO_BALLOON_PFN_SHIFT;
 
-                match queue_index {
-                    0 => {
-                        Self::release_memory_range(desc_chain.memory(), range_base, range_len)?;
-                    }
-                    1 => {
-                        Self::advise_memory_range(
-                            desc_chain.memory(),
-                            range_base,
-                            range_len,
-                            libc::MADV_WILLNEED,
-                        )?;
-                    }
-                    _ => return Err(Error::InvalidQueueIndex(queue_index)),
+                if queue_index == 0
+                    || (self.queues.len() >= 4 && queue_index == self.queues.len() - 2)
+                {
+                    Self::release_memory_range(desc_chain.memory(), range_base, range_len)?;
+                } else if queue_index == 1
+                    || (self.queues.len() >= 4 && queue_index == self.queues.len() - 1)
+                {
+                    Self::advise_memory_range(
+                        desc_chain.memory(),
+                        range_base,
+                        range_len,
+                        libc::MADV_WILLNEED,
+                    )?;
+                } else {
+                    return Err(Error::InvalidQueueIndex(queue_index));
                 }
             }
 
@@ -223,6 +248,10 @@ impl BalloonEpollHandler {
         } else {
             Ok(())
         }
+    }
+
+    fn process_stats_queue(&mut self, _queue_index: usize) -> result::Result<(), Error> {
+        todo!()
     }
 
     fn process_reporting_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
@@ -257,8 +286,23 @@ impl BalloonEpollHandler {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.inflate_queue_evt.as_raw_fd(), INFLATE_QUEUE_EVENT)?;
         helper.add_event(self.deflate_queue_evt.as_raw_fd(), DEFLATE_QUEUE_EVENT)?;
+        if let Some(stats_queue_evt) = self.stats_queue_evt.as_ref() {
+            helper.add_event(stats_queue_evt.as_raw_fd(), STATS_QUEUE_EVENT)?;
+        }
         if let Some(reporting_queue_evt) = self.reporting_queue_evt.as_ref() {
             helper.add_event(reporting_queue_evt.as_raw_fd(), REPORTING_QUEUE_EVENT)?;
+        }
+        if let Some(hetero_inflate_queue_evt) = self.hetero_inflate_queue_evt.as_ref() {
+            helper.add_event(
+                hetero_inflate_queue_evt.as_raw_fd(),
+                HETERO_INFLATE_QUEUE_EVENT,
+            )?;
+        }
+        if let Some(hetero_deflate_queue_evt) = self.hetero_deflate_queue_evt.as_ref() {
+            helper.add_event(
+                hetero_deflate_queue_evt.as_raw_fd(),
+                HETERO_DEFLATE_QUEUE_EVENT,
+            )?;
         }
         helper.run(paused, paused_sync, self)?;
 
@@ -302,6 +346,26 @@ impl EpollHelperHandler for BalloonEpollHandler {
                     ))
                 })?;
             }
+            STATS_QUEUE_EVENT => {
+                if let Some(stats_queue_evt) = self.stats_queue_evt.as_ref() {
+                    stats_queue_evt.read().map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to get statistics queue event: {:?}",
+                            e
+                        ))
+                    })?;
+                    self.process_stats_queue(2).map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal used statistics queue: {:?}",
+                            e
+                        ))
+                    })?;
+                } else {
+                    return Err(EpollHelperError::HandleEvent(anyhow!(
+                        "Invalid statistics queue event as no eventfd registered"
+                    )));
+                }
+            }
             REPORTING_QUEUE_EVENT => {
                 if let Some(reporting_queue_evt) = self.reporting_queue_evt.as_ref() {
                     reporting_queue_evt.read().map_err(|e| {
@@ -310,15 +374,58 @@ impl EpollHelperHandler for BalloonEpollHandler {
                             e
                         ))
                     })?;
-                    self.process_reporting_queue(2).map_err(|e| {
+                    self.process_reporting_queue(
+                        2 + self.stats_queue_evt.as_ref().map(|_| 1).unwrap_or(0),
+                    )
+                    .map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used inflate queue: {:?}",
+                            "Failed to signal used reporting queue: {:?}",
                             e
                         ))
                     })?;
                 } else {
                     return Err(EpollHelperError::HandleEvent(anyhow!(
                         "Invalid reporting queue event as no eventfd registered"
+                    )));
+                }
+            }
+            HETERO_INFLATE_QUEUE_EVENT => {
+                if let Some(hetero_inflate_queue_evt) = self.hetero_inflate_queue_evt.as_ref() {
+                    hetero_inflate_queue_evt.read().map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to get heterogeneous inflate queue event: {:?}",
+                            e
+                        ))
+                    })?;
+                    self.process_queue(self.queues.len() - 2).map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal used heterogeneous inflate queue: {:?}",
+                            e
+                        ))
+                    })?;
+                } else {
+                    return Err(EpollHelperError::HandleEvent(anyhow!(
+                        "Invalid heterogeneous inflate queue event as no eventfd registered"
+                    )));
+                }
+            }
+            HETERO_DEFLATE_QUEUE_EVENT => {
+                if let Some(hetero_deflate_queue_evt) = self.hetero_deflate_queue_evt.as_ref() {
+                    hetero_deflate_queue_evt.read().map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to get heterogeneous deflate queue event: {:?}",
+                            e
+                        ))
+                    })?;
+                    self.process_queue(self.queues.len() - 1).map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal used heterogeneous deflate queue: {:?}",
+                            e
+                        ))
+                    })?;
+                } else {
+                    return Err(EpollHelperError::HandleEvent(anyhow!(
+                        "Invalid heterogeneous deflate queue event as no eventfd registered"
                     )));
                 }
             }
@@ -354,11 +461,14 @@ pub struct Balloon {
 
 impl Balloon {
     // Create a new virtio-balloon.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
-        size: u64,
+        size: [u64; 2],
+        statistics: bool,
         deflate_on_oom: bool,
         free_page_reporting: bool,
+        heterogeneous_memory: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         state: Option<BalloonState>,
@@ -375,23 +485,36 @@ impl Balloon {
             )
         } else {
             let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
+            if statistics {
+                avail_features |= 1u64 << VIRTIO_BALLOON_F_STATS_VQ;
+            }
             if deflate_on_oom {
                 avail_features |= 1u64 << VIRTIO_BALLOON_F_DEFLATE_ON_OOM;
             }
             if free_page_reporting {
                 avail_features |= 1u64 << VIRTIO_BALLOON_F_REPORTING;
             }
+            if heterogeneous_memory {
+                avail_features |= 1u64 << VIRTIO_BALLOON_F_HETERO_MEM;
+            }
 
             let config = VirtioBalloonConfig {
-                num_pages: (size >> VIRTIO_BALLOON_PFN_SHIFT) as u32,
+                num_pages: (size[0] >> VIRTIO_BALLOON_PFN_SHIFT) as u32,
+                num_hetero_pages: (size[1] >> VIRTIO_BALLOON_PFN_SHIFT) as u32,
                 ..Default::default()
             };
 
             (avail_features, 0, config, false)
         };
 
+        if statistics {
+            queue_sizes.push(REPORTING_QUEUE_SIZE);
+        }
         if free_page_reporting {
             queue_sizes.push(REPORTING_QUEUE_SIZE);
+        }
+        if heterogeneous_memory {
+            queue_sizes.extend_from_slice(&[QUEUE_SIZE; 2]);
         }
 
         Ok(Balloon {
@@ -413,8 +536,9 @@ impl Balloon {
         })
     }
 
-    pub fn resize(&mut self, size: u64) -> Result<(), Error> {
-        self.config.num_pages = (size >> VIRTIO_BALLOON_PFN_SHIFT) as u32;
+    pub fn resize(&mut self, size: [u64; 2]) -> Result<(), Error> {
+        self.config.num_pages = (size[0] >> VIRTIO_BALLOON_PFN_SHIFT) as u32;
+        self.config.num_hetero_pages = (size[1] >> VIRTIO_BALLOON_PFN_SHIFT) as u32;
 
         if let Some(interrupt_cb) = &self.interrupt_cb {
             interrupt_cb
@@ -476,8 +600,10 @@ impl VirtioDevice for Balloon {
     }
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
-        // The "actual" field is the only mutable field
-        if offset != CONFIG_ACTUAL_OFFSET || data.len() != CONFIG_ACTUAL_SIZE {
+        // The "actual" and "hetero_actual" fields are the only mutable fields
+        if (offset != CONFIG_ACTUAL_OFFSET && offset != CONFIG_HETERO_ACTUAL_OFFSET)
+            || data.len() != CONFIG_ACTUAL_SIZE
+        {
             error!(
                 "Attempt to write to read-only field: offset {:x} length {}",
                 offset,
@@ -523,8 +649,32 @@ impl VirtioDevice for Balloon {
         let (_, queue, queue_evt) = queues.remove(0);
         virtqueues.push(queue);
         let deflate_queue_evt = queue_evt;
+        let stats_queue_evt =
+            if self.common.feature_acked(VIRTIO_BALLOON_F_STATS_VQ) && queues.is_empty() {
+                let (_, queue, queue_evt) = queues.remove(0);
+                virtqueues.push(queue);
+                Some(queue_evt)
+            } else {
+                None
+            };
         let reporting_queue_evt =
             if self.common.feature_acked(VIRTIO_BALLOON_F_REPORTING) && !queues.is_empty() {
+                let (_, queue, queue_evt) = queues.remove(0);
+                virtqueues.push(queue);
+                Some(queue_evt)
+            } else {
+                None
+            };
+        let hetero_inflate_queue_evt =
+            if self.common.feature_acked(VIRTIO_BALLOON_F_HETERO_MEM) && !queues.is_empty() {
+                let (_, queue, queue_evt) = queues.remove(0);
+                virtqueues.push(queue);
+                Some(queue_evt)
+            } else {
+                None
+            };
+        let hetero_deflate_queue_evt =
+            if self.common.feature_acked(VIRTIO_BALLOON_F_HETERO_MEM) && !queues.is_empty() {
                 let (_, queue, queue_evt) = queues.remove(0);
                 virtqueues.push(queue);
                 Some(queue_evt)
@@ -540,7 +690,10 @@ impl VirtioDevice for Balloon {
             interrupt_cb,
             inflate_queue_evt,
             deflate_queue_evt,
+            stats_queue_evt,
             reporting_queue_evt,
+            hetero_inflate_queue_evt,
+            hetero_deflate_queue_evt,
             kill_evt,
             pause_evt,
         };

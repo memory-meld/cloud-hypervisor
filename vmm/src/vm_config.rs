@@ -367,13 +367,19 @@ impl Default for RngConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BalloonConfig {
-    pub size: u64,
+    pub size: [u64; 2],
+    /// Option to report guest memory statistics.
+    #[serde(default)]
+    pub statistics: bool,
     /// Option to deflate the balloon in case the guest is out of memory.
     #[serde(default)]
     pub deflate_on_oom: bool,
     /// Option to enable free page reporting from the guest.
     #[serde(default)]
     pub free_page_reporting: bool,
+    /// Option to enable ballooning heterogeneous memory.
+    #[serde(default)]
+    pub heterogeneous_memory: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
