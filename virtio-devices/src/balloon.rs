@@ -114,7 +114,7 @@ pub struct VirtioBalloonConfig {
 }
 
 const CONFIG_ACTUAL_OFFSET: u64 = 4;
-const CONFIG_HETERO_ACTUAL_OFFSET: u64 = 16;
+const CONFIG_HETERO_ACTUAL_OFFSET: u64 = 20;
 const CONFIG_ACTUAL_SIZE: usize = 4;
 
 // SAFETY: it only has data and has no implicit padding.
