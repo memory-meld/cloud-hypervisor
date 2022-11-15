@@ -20,10 +20,13 @@ use crate::{
 };
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::mem::size_of;
+use std::num::Wrapping;
 use std::os::unix::io::AsRawFd;
 use std::result;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{atomic::AtomicBool, Arc, Barrier};
 use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
@@ -93,6 +96,8 @@ pub enum Error {
     QueueAddUsed(virtio_queue::Error),
     #[error("Failed creating an iterator over the queue: {0}")]
     QueueIterator(virtio_queue::Error),
+    #[error("Guest sent an unexpected balloon statistic tag: {0}")]
+    UnexpectedStatTag(u16),
 }
 
 // Got from include/uapi/linux/virtio_balloon.h
@@ -178,6 +183,7 @@ struct BalloonEpollHandler {
     kill_evt: EventFd,
     pause_evt: EventFd,
     pbp: Option<PartiallyBalloonedPage>,
+    counters: Arc<BalloonCounters>,
 }
 
 impl BalloonEpollHandler {
@@ -333,8 +339,87 @@ impl BalloonEpollHandler {
         }
     }
 
-    fn process_stats_queue(&mut self, _queue_index: usize) -> result::Result<(), Error> {
-        todo!()
+    fn process_stats_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
+        // let mut used_descs = false;
+        while let Some(mut desc_chain) =
+            self.queues[queue_index].pop_descriptor_chain(self.mem.memory())
+        {
+            let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
+
+            #[repr(C, packed)]
+            #[derive(Copy, Clone, Debug, Default, Versionize)]
+            pub struct BalloonStat {
+                tag: u16,
+                val: u64,
+            }
+            // SAFETY: BalloonStat is a POB which does not contain any pointers
+            unsafe impl ByteValued for BalloonStat {}
+
+            let data_chunk_size = size_of::<BalloonStat>();
+
+            // The head contains the request type which MUST be readable.
+            if desc.is_write_only() {
+                error!("The head contains the request type is not right");
+                return Err(Error::UnexpectedWriteOnlyDescriptor);
+            }
+            if desc.len() as usize % data_chunk_size != 0 {
+                error!("the request size {} is not right", desc.len());
+                return Err(Error::InvalidRequest);
+            }
+
+            let mut offset = 0u64;
+            while offset < desc.len() as u64 {
+                let addr = desc.addr().checked_add(offset).unwrap();
+                let stat: BalloonStat = desc_chain
+                    .memory()
+                    .read_obj(addr)
+                    .map_err(Error::GuestMemory)?;
+                offset += data_chunk_size as u64;
+                match stat.tag {
+                    0 => self.counters.swap_in.store(stat.val, Ordering::Release),
+                    1 => self.counters.swap_out.store(stat.val, Ordering::Release),
+                    2 => self
+                        .counters
+                        .major_faults
+                        .store(stat.val, Ordering::Release),
+                    3 => self
+                        .counters
+                        .minor_faults
+                        .store(stat.val, Ordering::Release),
+                    4 => self.counters.free_memory.store(stat.val, Ordering::Release),
+                    5 => self
+                        .counters
+                        .total_memory
+                        .store(stat.val, Ordering::Release),
+                    6 => self
+                        .counters
+                        .available_memory
+                        .store(stat.val, Ordering::Release),
+                    7 => self.counters.disk_caches.store(stat.val, Ordering::Release),
+                    8 => self
+                        .counters
+                        .hugetlb_allocations
+                        .store(stat.val, Ordering::Release),
+                    9 => self
+                        .counters
+                        .hugetlb_failures
+                        .store(stat.val, Ordering::Release),
+                    _ => return Err(Error::UnexpectedStatTag(stat.tag)),
+                };
+            }
+            self.queues[queue_index]
+                .add_used(desc_chain.memory(), desc_chain.head_index(), desc.len())
+                .map_err(Error::QueueAddUsed)?;
+            // used_descs = true;
+        }
+
+        // TODO: signal the Guest when we need to refresh statistics
+        // if used_descs {
+        //     self.signal(VirtioInterruptType::Queue(queue_index as u16))
+        // } else {
+        //     Ok(())
+        // }
+        Ok(())
     }
 
     fn process_reporting_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
@@ -540,6 +625,7 @@ pub struct Balloon {
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
+    counters: Arc<BalloonCounters>,
 }
 
 impl Balloon {
@@ -616,6 +702,7 @@ impl Balloon {
             seccomp_action,
             exit_evt,
             interrupt_cb: None,
+            counters: Arc::new(BalloonCounters::default()),
         })
     }
 
@@ -733,7 +820,7 @@ impl VirtioDevice for Balloon {
         virtqueues.push(queue);
         let deflate_queue_evt = queue_evt;
         let stats_queue_evt =
-            if self.common.feature_acked(VIRTIO_BALLOON_F_STATS_VQ) && queues.is_empty() {
+            if self.common.feature_acked(VIRTIO_BALLOON_F_STATS_VQ) && !queues.is_empty() {
                 let (_, queue, queue_evt) = queues.remove(0);
                 virtqueues.push(queue);
                 Some(queue_evt)
@@ -780,6 +867,7 @@ impl VirtioDevice for Balloon {
             kill_evt,
             pause_evt,
             pbp: None,
+            counters: self.counters.clone(),
         };
 
         let paused = self.common.paused.clone();
@@ -805,6 +893,51 @@ impl VirtioDevice for Balloon {
         event!("virtio-device", "reset", "id", &self.id);
         result
     }
+
+    fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {
+        Some(HashMap::from([
+            (
+                "swap_in",
+                Wrapping(self.counters.swap_in.load(Ordering::Acquire)),
+            ),
+            (
+                "swap_out",
+                Wrapping(self.counters.swap_out.load(Ordering::Acquire)),
+            ),
+            (
+                "major_faults",
+                Wrapping(self.counters.major_faults.load(Ordering::Acquire)),
+            ),
+            (
+                "minor_faults",
+                Wrapping(self.counters.minor_faults.load(Ordering::Acquire)),
+            ),
+            (
+                "free_memory",
+                Wrapping(self.counters.free_memory.load(Ordering::Acquire)),
+            ),
+            (
+                "total_memory",
+                Wrapping(self.counters.total_memory.load(Ordering::Acquire)),
+            ),
+            (
+                "available_memory",
+                Wrapping(self.counters.available_memory.load(Ordering::Acquire)),
+            ),
+            (
+                "disk_caches",
+                Wrapping(self.counters.disk_caches.load(Ordering::Acquire)),
+            ),
+            (
+                "hugetlb_allocations",
+                Wrapping(self.counters.hugetlb_allocations.load(Ordering::Acquire)),
+            ),
+            (
+                "hugetlb_failures",
+                Wrapping(self.counters.hugetlb_failures.load(Ordering::Acquire)),
+            ),
+        ]))
+    }
 }
 
 impl Pausable for Balloon {
@@ -828,3 +961,17 @@ impl Snapshottable for Balloon {
 }
 impl Transportable for Balloon {}
 impl Migratable for Balloon {}
+
+#[derive(Debug, Default)]
+pub struct BalloonCounters {
+    swap_in: AtomicU64,
+    swap_out: AtomicU64,
+    major_faults: AtomicU64,
+    minor_faults: AtomicU64,
+    free_memory: AtomicU64,
+    total_memory: AtomicU64,
+    available_memory: AtomicU64,
+    disk_caches: AtomicU64,
+    hugetlb_allocations: AtomicU64,
+    hugetlb_failures: AtomicU64,
+}
