@@ -1243,13 +1243,17 @@ impl BalloonConfig {
         parser.add("heterogeneous_memory");
         parser.parse(balloon).map_err(Error::ParseBalloon)?;
 
-        let size = parser
-            .convert::<ByteSizedList>("size")
-            .map_err(Error::ParseBalloon)?
-            .map(|v| v.0)
-            .unwrap_or_default()
-            .try_into()
-            .unwrap_or([0; 2]);
+        let size = if let Some(size) = parser.convert::<ByteSized>("size").ok() {
+            [size.unwrap_or(ByteSized(0)).0, 0]
+        } else {
+            parser
+                .convert::<ByteSizedList>("size")
+                .map_err(Error::ParseBalloon)?
+                .map(|v| v.0)
+                .unwrap_or_default()
+                .try_into()
+                .unwrap_or([0; 2])
+        };
 
         let statistics = parser
             .convert::<Toggle>("statistics")
