@@ -131,3 +131,10 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
     && unzip ethr_linux.zip \
     && cp ethr /usr/local/bin \
     && rm ethr_linux.zip; fi
+
+# install latest stable LLVM
+RUN apt-get update \
+    && apt-get -yq upgrade \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -yq \
+      lsb-release wget software-properties-common gnupg \
+    && curl -fsSL https://apt.llvm.org/llvm.sh | bash

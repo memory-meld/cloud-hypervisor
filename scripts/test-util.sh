@@ -46,20 +46,22 @@ build_custom_linux() {
     ARCH=$(uname -m)
     SRCDIR=$PWD
     LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
-    LINUX_CUSTOM_BRANCH="ch-5.15.12"
-    LINUX_CUSTOM_URL="https://github.com/cloud-hypervisor/linux.git"
+    LINUX_CUSTOM_BRANCH="rust"
+    LINUX_CUSTOM_URL="https://github.com/cuhk-mass/linux.git"
+    LINUX_BUILD_DIR="$WORKLOADS_DIR/linux-build"
 
     checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"
 
-    cp $SRCDIR/resources/linux-config-${ARCH} $LINUX_CUSTOM_DIR/.config
+    mkdir -p $LINUX_BUILD_DIR
+    cp $SRCDIR/resources/linux-config-${ARCH} $LINUX_BUILD_DIR/.config
 
     pushd $LINUX_CUSTOM_DIR
-    make -j `nproc`
+    make -j `nproc` LLVM=-15 O="$LINUX_BUILD_DIR"
     if [ ${ARCH} == "x86_64" ]; then
-       cp vmlinux "$WORKLOADS_DIR/" || exit 1
+       cp $LINUX_BUILD_DIR/vmlinux "$WORKLOADS_DIR/" || exit 1
     elif [ ${ARCH} == "aarch64" ]; then
-       cp arch/arm64/boot/Image "$WORKLOADS_DIR/" || exit 1
-       cp arch/arm64/boot/Image.gz "$WORKLOADS_DIR/" || exit 1
+       cp $LINUX_BUILD_DIR/arch/arm64/boot/Image "$WORKLOADS_DIR/" || exit 1
+       cp $LINUX_BUILD_DIR/arch/arm64/boot/Image.gz "$WORKLOADS_DIR/" || exit 1
     fi
     popd
 }
