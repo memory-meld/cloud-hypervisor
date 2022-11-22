@@ -737,7 +737,7 @@ pub fn exec_host_command_output(command: &str) -> Output {
         .unwrap_or_else(|_| panic!("Expected '{}' to run", command))
 }
 
-pub const PIPE_SIZE: i32 = 32 << 20;
+pub const PIPE_SIZE: i32 = 1 << 20;
 
 static NEXT_VM_ID: Lazy<Mutex<u8>> = Lazy::new(|| Mutex::new(1));
 
