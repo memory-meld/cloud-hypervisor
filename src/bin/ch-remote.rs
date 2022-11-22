@@ -499,14 +499,18 @@ fn resize_config(
     };
 
     let desired_balloon: Option<[u64; 2]> = if let Some(balloon) = balloon {
-        Some(
-            balloon
-                .parse::<ByteSizedList>()
-                .map_err(Error::InvalidBalloonSize)?
-                .0
-                .try_into()
-                .unwrap_or([0; 2]),
-        )
+        if let Some(balloon) = balloon.parse::<ByteSized>().ok() {
+            Some([balloon.0, 0])
+        } else {
+            Some(
+                balloon
+                    .parse::<ByteSizedList>()
+                    .map_err(Error::InvalidBalloonSize)?
+                    .0
+                    .try_into()
+                    .unwrap_or([0; 2]),
+            )
+        }
     } else {
         None
     };
