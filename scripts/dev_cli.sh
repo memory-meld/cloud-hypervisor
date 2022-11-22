@@ -10,7 +10,7 @@ CTR_IMAGE_TAG="cloudhypervisor/dev"
 CTR_IMAGE_VERSION="20220705-0"
 CTR_IMAGE="${CTR_IMAGE_TAG}:${CTR_IMAGE_VERSION}"
 
-DOCKER_RUNTIME="docker"
+DOCKER_RUNTIME="podman"
 
 # Host paths
 CLH_SCRIPTS_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -145,7 +145,7 @@ fix_dir_perms() {
         --volume /dev:/dev \
         --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" $exported_volumes \
         "$CTR_IMAGE" \
-        chown -R "$(id -u):$(id -g)" "$CTR_CLH_ROOT_DIR"
+        chown -R "0:0" "$CTR_CLH_ROOT_DIR"
 
     return "$1"
 }
