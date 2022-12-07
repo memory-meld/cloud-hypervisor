@@ -192,6 +192,23 @@ impl UbuntuDiskConfig {
     }
 }
 
+#[derive(Clone)]
+pub struct ClearDiskConfig {
+    osdisk_path: String,
+    cloudinit_path: String,
+    image_name: String,
+}
+
+impl ClearDiskConfig {
+    pub fn new(image_name: String) -> Self {
+        ClearDiskConfig {
+            image_name,
+            osdisk_path: String::new(),
+            cloudinit_path: String::new(),
+        }
+    }
+}
+
 pub struct WindowsDiskConfig {
     image_name: String,
     osdisk_path: String,
@@ -320,6 +337,59 @@ impl DiskConfig for UbuntuDiskConfig {
             });
 
         cloudinit_file_path
+    }
+
+    fn prepare_files(&mut self, tmp_dir: &TempDir, network: &GuestNetworkConfig) {
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
+
+        let mut osdisk_base_path = workload_path;
+        osdisk_base_path.push(&self.image_name);
+
+        let osdisk_path = String::from(tmp_dir.as_path().join("osdisk.img").to_str().unwrap());
+        let cloudinit_path = self.prepare_cloudinit(tmp_dir, network);
+
+        rate_limited_copy(osdisk_base_path, &osdisk_path)
+            .expect("copying of OS source disk image failed");
+
+        self.cloudinit_path = cloudinit_path;
+        self.osdisk_path = osdisk_path;
+    }
+
+    fn disk(&self, disk_type: DiskType) -> Option<String> {
+        match disk_type {
+            DiskType::OperatingSystem => Some(self.osdisk_path.clone()),
+            DiskType::CloudInit => Some(self.cloudinit_path.clone()),
+        }
+    }
+}
+
+impl DiskConfig for ClearDiskConfig {
+    fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String {
+        let config_drive_path = String::from(tmp_dir.as_path().join("cloudinit").to_str().unwrap());
+
+        let cloud_init_directory = tmp_dir.as_path().join("cloud-init").join("clear");
+
+        fs::create_dir_all(&cloud_init_directory)
+            .expect("Expect creating cloud-init directory to succeed");
+
+        std::process::Command::new("mkdosfs")
+            .args(["-n", "config-2"])
+            .args(["-C", config_drive_path.as_str()])
+            .arg("8192")
+            .output()
+            .expect("Expect creating disk image to succeed");
+
+        vec!["openstack"].iter().for_each(|x| {
+            std::process::Command::new("mcopy")
+                .arg("-o")
+                .args(["-i", config_drive_path.as_str()])
+                .args(["-s", cloud_init_directory.join(x).to_str().unwrap(), "::"])
+                .output()
+                .expect("Expect copying files to disk image to succeed");
+        });
+
+        config_drive_path
     }
 
     fn prepare_files(&mut self, tmp_dir: &TempDir, network: &GuestNetworkConfig) {
