@@ -38,9 +38,51 @@ write_files:
         #!/bin/bash
         set -e
         echo -n "@DEFAULT_TCP_LISTENER_MESSAGE" > /dev/tcp/@HOST_IP/@TCP_LISTENER_PORT
+  -
+    path: /etc/systemd/network/11-id0.network
+    permissions: 0644
+    content: |
+        [Match]
+        MACAddress=12:34:56:78:90:ab
+
+        [Network]
+        Address=192.168.2.2/24
+        Gateway=192.168.2.1
+  -
+    path: /etc/systemd/network/11-id1.network
+    permissions: 0644
+    content: |
+        [Match]
+        MACAddress=de:ad:be:ef:12:34
+
+        [Network]
+        Address=192.168.2.3/24
+        Gateway=192.168.2.1
+  -
+    path: /etc/systemd/network/11-id2.network
+    permissions: 0644
+    content: |
+        [Match]
+        MACAddress=de:ad:be:ef:34:56
+
+        [Network]
+        Address=192.168.2.4/24
+        Gateway=192.168.2.1
+  -
+    path: /etc/systemd/network/11-id3.network
+    permissions: 0644
+    content: |
+        [Match]
+        MACAddress=de:ad:be:ef:56:78
+
+        [Network]
+        Address=192.168.2.5/24
+        Gateway=192.168.2.1
+service:
+  - reload
+  - restart: systemd-networkd
+  - enable: notify-booted.service
 runcmd:
-  - [ systemctl, daemon-reload ]
-  - [ systemctl, enable, notify-booted.service ]
   - [ systemctl, start, --no-block, notify-booted.service ]
 package_upgrade: true
 packages:

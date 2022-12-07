@@ -368,10 +368,50 @@ impl DiskConfig for ClearDiskConfig {
     fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String {
         let config_drive_path = String::from(tmp_dir.as_path().join("cloudinit").to_str().unwrap());
 
-        let cloud_init_directory = tmp_dir.as_path().join("cloud-init").join("clear");
+        let cloud_init_directory = tmp_dir.as_path().join("openstack").join("latest");
 
         fs::create_dir_all(&cloud_init_directory)
             .expect("Expect creating cloud-init directory to succeed");
+
+        let source_file_dir = std::env::current_dir()
+            .unwrap()
+            .join("test_data")
+            .join("cloud-init")
+            .join("clear")
+            .join("openstack")
+            .join("latest");
+
+        vec!["meta_data.json"].iter().for_each(|x| {
+            rate_limited_copy(source_file_dir.join(x), cloud_init_directory.join(x))
+                .expect("Expect copying cloud-init meta_data.json to succeed");
+        });
+
+        let mut user_data_string = String::new();
+        fs::File::open(source_file_dir.join("user_data"))
+            .unwrap()
+            .read_to_string(&mut user_data_string)
+            .expect("Expected reading user-data file in to succeed");
+        user_data_string = user_data_string.replace(
+            "@DEFAULT_TCP_LISTENER_MESSAGE",
+            DEFAULT_TCP_LISTENER_MESSAGE,
+        );
+        user_data_string = user_data_string.replace("@HOST_IP", &network.host_ip);
+        user_data_string =
+            user_data_string.replace("@TCP_LISTENER_PORT", &network.tcp_listener_port.to_string());
+        user_data_string = user_data_string.replace("192.168.2.1", &network.host_ip);
+        user_data_string = user_data_string.replace("192.168.2.2", &network.guest_ip);
+        user_data_string = user_data_string.replace("192.168.2.3", &network.l2_guest_ip1);
+        user_data_string = user_data_string.replace("192.168.2.4", &network.l2_guest_ip2);
+        user_data_string = user_data_string.replace("192.168.2.5", &network.l2_guest_ip3);
+        user_data_string = user_data_string.replace("12:34:56:78:90:ab", &network.guest_mac);
+        user_data_string = user_data_string.replace("de:ad:be:ef:12:34", &network.l2_guest_mac1);
+        user_data_string = user_data_string.replace("de:ad:be:ef:34:56", &network.l2_guest_mac2);
+        user_data_string = user_data_string.replace("de:ad:be:ef:56:78", &network.l2_guest_mac3);
+
+        fs::File::create(cloud_init_directory.join("user_data"))
+            .unwrap()
+            .write_all(user_data_string.as_bytes())
+            .expect("Expected writing out user_data to succeed");
 
         std::process::Command::new("mkdosfs")
             .args(["-n", "config-2"])
@@ -380,14 +420,16 @@ impl DiskConfig for ClearDiskConfig {
             .output()
             .expect("Expect creating disk image to succeed");
 
-        vec!["openstack"].iter().for_each(|x| {
-            std::process::Command::new("mcopy")
-                .arg("-o")
-                .args(["-i", config_drive_path.as_str()])
-                .args(["-s", cloud_init_directory.join(x).to_str().unwrap(), "::"])
-                .output()
-                .expect("Expect copying files to disk image to succeed");
-        });
+        std::process::Command::new("mcopy")
+            .arg("-o")
+            .args(["-i", config_drive_path.as_str()])
+            .args([
+                "-s",
+                cloud_init_directory.parent().unwrap().to_str().unwrap(),
+                "::",
+            ])
+            .output()
+            .expect("Expect copying files to disk image to succeed");
 
         config_drive_path
     }
@@ -853,6 +895,7 @@ impl Guest {
 
         Self::new_from_ip_range(disk_config, "192.168", id)
     }
+
 
     pub fn default_net_string(&self) -> String {
         format!(
