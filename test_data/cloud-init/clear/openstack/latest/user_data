@@ -3,41 +3,45 @@ envar:
   - http_proxy : proxy.cse.cuhk.edu.hk:8000
   - https_proxy : proxy.cse.cuhk.edu.hk:8000
   - no_proxy : cse.cuhk.edu.hk,.cse.cuhk.edu.hk,localhost
-package_upgrade: true
-packages:
-  - os-core-dev
-  - curl
-runcmd:
-  - [ sh, -xc, "echo $(date) ': hello cloudinit!'" ]
 ssh_authorized_keys:
   - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIP8lyVDmMwXauShyBZXBH5gXY6FpG2+UsAuAkHko0ALq jlhu@cse.cuhk.edu.hk
 users:
-  - name: jlhu
-    gecos: Junliang HU
+  - name: cloud
+    passwd: $6$Oz3zW/5.6eBSs3FW$cejrseWHfTl6lfJeXT9JKO3Y9liNFiZ6I0cK3SURf3GUtT2CsB47V2lvsqqQ/T8bx5GQ3xJaYfWrU9u8/hJ9i0
     groups: wheel
-    passwd: $6$AjMeI/2iQTXH8upn$vNPnywP.AXCa8GJWgF1uka71boroiSAPn9yTLlLkJ0UU19wk97KFnqpjPXXOT50R41Mrs./Ojl0fkg0jPdHec/
-    ssh-authorized-keys:
-      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIP8lyVDmMwXauShyBZXBH5gXY6FpG2+UsAuAkHko0ALq jlhu@cse.cuhk.edu.hk
+    no-create-home: false
     sudo:
       - ALL=(ALL) NOPASSWD:ALL
+    inactive: false
     system: true
 write_files:
   -
-    content: |
-        A test file
-    path: /tmp/cloud-init-test-1
-    owner: nobody.nogroup
+    path: /etc/systemd/system/notify-booted.service
     permissions: 0644
-  -
     content: |
-        Another test file
-    path: /tmp/cloud-init-test-2
-    owner: root.root
-    permissions: 0600
-  -
-    content: |
-        Yet another test file
-    path: /tmp/cloud-init-test-3
-    owner: jlhu.jlhu
-    permissions: 0664
+        [Unit]
+        Description=Notify the tcp listener on the host that the guest is booted
+        After=sshd.service
 
+        [Service]
+        Type=simple
+        ExecStart=/usr/bin/cloud-hypervisor-notify-booted.sh
+        Restart=on-failure
+        RestartSec=2
+
+        [Install]
+        WantedBy=multi-user.target
+  -
+    path: /usr/bin/cloud-hypervisor-notify-booted.sh
+    permissions: 0755
+    content: |
+        #!/bin/bash
+        set -e
+        echo -n "@DEFAULT_TCP_LISTENER_MESSAGE" > /dev/tcp/@HOST_IP/@TCP_LISTENER_PORT
+runcmd:
+  - [ systemctl, daemon-reload ]
+  - [ systemctl, enable, notify-booted.service ]
+  - [ systemctl, start, --no-block, notify-booted.service ]
+package_upgrade: true
+packages:
+  - curl
