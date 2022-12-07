@@ -1,0 +1,14 @@
+{
+  "uuid": "b9517879-4e93-4a1a-9073-4ae0ddfac27c",
+  "keys": [
+    {
+      "data": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIP8lyVDmMwXauShyBZXBH5gXY6FpG2+UsAuAkHko0ALq jlhu@cse.cuhk.edu.hk\n",
+      "type": "ssh",
+      "name": "userkey"
+    }
+  ],
+  "hostname": "clr",
+  "public_keys": {
+    "userkey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIP8lyVDmMwXauShyBZXBH5gXY6FpG2+UsAuAkHko0ALq jlhu@cse.cuhk.edu.hk\n"
+  }
+}
