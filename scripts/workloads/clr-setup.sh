@@ -47,19 +47,22 @@ if ! "$NGINX" -version &>/dev/null; then
 fi
 
 # setup gbbs
-GBBS="$DIR/gbbs/bazel-bin/benchmarks/PageRank/PageRank_main"
+GBBS="$DIR/gbbs/benchmarks/PageRank/PageRank"
 GBBSARGS="$GBBS -rounds 1 -s -b -c $DIR/gbbs/inputs/twitter-2010.bcsr"
-go install github.com/bazelbuild/bazelisk@latest
-[ -d "$DIR"/gbbs ] || git clone --recurse-submodules https://github.com/ParAlg/gbbs "$DIR"/gbbs
+[ -d "$DIR"/gbbs ] || {
+    git clone --recurse-submodules https://github.com/ParAlg/gbbs "$DIR"/gbbs
+    git checkout 19bba1aacf052bacd7ad175ac145347267cec629
+}
 pushd "$DIR"/gbbs
-git checkout 19bba1aacf052bacd7ad175ac145347267cec629
-CC=clang CXX=clang++ bazelisk build //utils/... //benchmarks/PageRank:PageRank_main
+[ -e utils/snap_converter ] || make CC=clang++ CXX=clang++ -j -C utils snap_converter
+[ -e utils/compressor ] || make CC=clang++ CXX=clang++ -j -C utils compressor
+[ -e benchmarks/PageRank/PageRank ] ||  make CC=clang++ CXX=clang++ -j -C benchmarks/PageRank PageRank
 [ -e inputs/twitter-2010.txt.gz ] || wget -O inputs/twitter-2010.txt.gz https://snap.stanford.edu/data/twitter-2010.txt.gz
 [ -e inputs/twitter-2010.txt ] || gzip -dkq inputs/twitter-2010.txt.gz
-[ -e inputs/twitter-2010.adj ] || bazel-bin/utils/snap_converter -s -i inputs/twitter-2010.txt -o inputs/twitter-2010.adj
-[ -e inputs/twitter-2010.bcsr ] || bazel-bin/utils/compressor -s -o inputs/twitter-2010.bcsr inputs/twitter-2010.adj
+[ -e inputs/twitter-2010.adj ] || utils/snap_converter -s -i inputs/twitter-2010.txt -o inputs/twitter-2010.adj
+[ -e inputs/twitter-2010.bcsr ] || utils/compressor -s -o inputs/twitter-2010.bcsr inputs/twitter-2010.adj
 popd
-$GBBSARGS
+# $GBBSARGS
 
 echo "all done!"
 
