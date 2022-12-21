@@ -5,3 +5,6 @@
 **/Cargo.lock
 **/rusty-tags.vi
 /rpm/SOURCES
+scripts/workloads/*.tgz
+scripts/workloads/cockroach*/
+scripts/workloads/gbbs/
