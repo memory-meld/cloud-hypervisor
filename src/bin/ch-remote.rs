@@ -499,7 +499,7 @@ fn resize_config(
     };
 
     let desired_balloon: Option<[u64; 2]> = if let Some(balloon) = balloon {
-        if let Some(balloon) = balloon.parse::<ByteSized>().ok() {
+        if let Ok(balloon) = balloon.parse::<ByteSized>() {
             Some([balloon.0, 0])
         } else {
             Some(
