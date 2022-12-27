@@ -181,6 +181,7 @@ def create_vm(id: int, ncpus: int = 4, mem: int = 8 << 30, dram_ratio=0.5):
     host_cpus = ",".join(map(str, node_to_cpus(0)))
     affinity = ",".join([f"{i}@[{host_cpus}]" for i in range(ncpus)])
     mac = get_mac(id)
+    assert 0.0 <= dram_ratio <= 1.0, f"Unexpected dram_ratio: {dram_ratio}"
     dram = int(mem * dram_ratio)
     pmem = mem - dram
     fs_args = [
@@ -216,17 +217,21 @@ def create_vm(id: int, ncpus: int = 4, mem: int = 8 << 30, dram_ratio=0.5):
         f"guest_numa_id=0,cpus=0-{ncpus-1},memory_zones=fast",
         "guest_numa_id=1,memory_zones=slow",
     ]
-    virtiofsd = Popen(fs_args, cwd=cwd)
+    virtiofsd = Popen(fs_args, cwd=cwd, stdout=PIPE, stderr=PIPE)
     time.sleep(1)
-    ch = Popen(ch_args, cwd=cwd)
+    ch = Popen(ch_args, cwd=cwd, stdout=PIPE, stderr=PIPE)
 
     try:
         yield ch
     finally:
         ch.terminate()
-        ch.wait()
+        out, err = wait_for_exit([ch])[0]
+        print(
+            f"vm{id} cloud-hypervisor stdout:\n{out}\nvm{id} cloud-hypervisor stderr:\n{err}"
+        )
         virtiofsd.terminate()
         virtiofsd.wait()
+
         try:
             [
                 Path(cwd + "/" + f).unlink()
@@ -298,7 +303,7 @@ def subcmd_redis(args, vms: List[Popen]):
         case "a":
             ycsb_args += YCSB_A_ARGS
         case _:
-            assert False, "not implemented yet"
+            assert False, f"Workload not implemented yet: {args.workload}"
 
     jobs = [
         Popen(
@@ -340,7 +345,7 @@ def wait_for_boot(num: int):
 
 
 def main(args):
-    logging.basicConfig(logging.getLevelName(args.log_level))
+    logging.basicConfig(level=logging.getLevelName(args.log_level))
     with pmem(), network(args.num), ExitStack() as stack:
         vms = [
             stack.enter_context(create_vm(i, args.ncpus, args.mem, args.dram_ratio))
@@ -353,7 +358,7 @@ def main(args):
             case "redis":
                 subcmd_redis(args, vms)
             case _:
-                assert False, f"subcmd not implemented: {args.subcmd}"
+                assert False, f"Subcmd not implemented: {args.subcmd}"
 
 
 if __name__ == "__main__":
