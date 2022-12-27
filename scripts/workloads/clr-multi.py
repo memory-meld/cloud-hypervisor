@@ -3,8 +3,9 @@ import argparse
 import time
 from contextlib import ExitStack, contextmanager
 from functools import reduce
+from logging import info
 from pathlib import Path
-from subprocess import Popen, check_output, run
+from subprocess import DEVNULL, PIPE, Popen, check_output, run
 from typing import List, Tuple
 
 from numa.info import node_to_cpus
@@ -43,6 +44,15 @@ CLOUD_HYPERVISOR = DEFAULT_TEST_DIR + "/base/cloud-hypervisor"
 VIRTIOFSD = DEFAULT_TEST_DIR + "/base/virtiofsd"
 CH_REMOTE = DEFAULT_TEST_DIR + "/base/ch-remote"
 GO_YCSB = DEFAULT_TEST_DIR + "/base/go-ycsb"
+DEFAULT_SSH_ARGS = [
+    "ssh",
+    "-o",
+    "StrictHostKeyChecking=no",
+    "-o",
+    "UserKnownHostsFile=/dev/null",
+    "-o",
+    "ConnectTimeout=1",
+]
 DEFAULT_NETWORK_CONFIG = """
     <network>
       <name>default</name>
@@ -136,7 +146,11 @@ def network(num: int = 40):
 @contextmanager
 def pmem():
     """Convert all devdax PMEM into system ram."""
-    run(["sudo", "daxctl", "reconfigure-device", "--human", "--mode=system-ram", "all"])
+    run(
+        ["sudo", "daxctl", "reconfigure-device", "--human", "--mode=system-ram", "all"],
+        capture_output=True,
+        check=True,
+    )
     try:
         yield None
     finally:
@@ -216,7 +230,10 @@ def create_vm(id: int, ncpus: int = 4, mem: int = 8 << 30):
 
 def ssh_cmd(id: int, args: List[str], **kwargs) -> str:
     """Run commands via SSH in the `id`-th VM."""
-    return check_output(["ssh", get_ip(id)] + args, **kwargs).decode("utf-8")
+    return check_output(
+        DEFAULT_SSH_ARGS + [get_ip(id)] + args,
+        **kwargs,
+    ).decode("utf-8")
 
 
 def subcmd_redis(args, vms: List[Popen]):
@@ -244,14 +261,16 @@ def subcmd_redis(args, vms: List[Popen]):
     while not reduce(
         bool.__and__,
         map(
-            lambda i: ssh_cmd(i, ["redis-cli", "dbsize"]).strip()
+            lambda i: ssh_cmd(i, ["redis-cli", "dbsize"], stderr=DEVNULL).strip()
             == f"{YCSB_RECORD_COUNT}",
             range(args.num),
         ),
     ):
-        time.sleep(5)
+        time.sleep(1)
+    info("YCSB preload complelte")
     # run ycsb on node 1 to prevent interference with VM running on node 0
-    ycsb_a_args = [
+
+    ycsb_args = [
         "numactl",
         "--cpunodebind=1",
         "--membind=1",
@@ -265,9 +284,20 @@ def subcmd_redis(args, vms: List[Popen]):
         f"operationcount={YCSB_OPERATION_COUNT}",
         "-p",
         f"threadcount={args.ncpus}",
-    ] + YCSB_A_ARGS
+    ]
+    match args.workload:
+        case "a":
+            ycsb_args += YCSB_A_ARGS
+        case _:
+            assert False, "not implemented yet"
+
     jobs = [
-        Popen(ycsb_a_args + ["-p", f"redis.addr={get_ip(id)}:6379"], cwd=get_cwd(id))
+        Popen(
+            ycsb_args + ["-p", f"redis.addr={get_ip(id)}:6379"],
+            cwd=get_cwd(id),
+            stdout=PIPE,
+            stderr=PIPE,
+        )
         for id in range(args.num)
     ]
     for i, (out, err) in enumerate(wait_for_exit(jobs)):
@@ -281,14 +311,22 @@ def subcmd_redis(args, vms: List[Popen]):
 def wait_for_exit(subprocesses: List[Popen]) -> List[Tuple[str, str]]:
     """Call communicate() and return str (stdout, stderr) for each process."""
     return [
-        (out.decode("utf-8"), err.decode("utf-8"))
+        (
+            "" if out is None else out.decode("utf-8"),
+            "" if err is None else err.decode("utf-8"),
+        )
         for (out, err) in map(Popen.communicate, subprocesses)
     ]
 
 
 def wait_for_boot(num: int):
     for i in range(num):
-        check_output(f"until ssh {get_ip(i)} uname -a; do sleep 1; done", shell=True)
+        check_output(
+            f"until {' '.join(DEFAULT_SSH_ARGS)} {get_ip(i)} uname -a; do sleep 1; done",
+            shell=True,
+            stderr=DEVNULL,
+        )
+    info("all VM booted")
 
 
 def main(args):
@@ -331,6 +369,13 @@ if __name__ == "__main__":
         dest="subcmd", title="workloads", description="valid workloads"
     )
     redis_parser = subcmd.add_parser("redis")
+    redis_parser.add_argument(
+        "--workload",
+        "-w",
+        default="a",
+        choices=["a", "b", "c", "d", "e", "f"],
+        help="Which YCSB workload to run on redis, defaults to a",
+    )
     mix_parser = subcmd.add_parser("mix")
     manual_parser = subcmd.add_parser("manual")
     main(parser.parse_args())
