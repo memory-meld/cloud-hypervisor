@@ -345,7 +345,12 @@ def wait_for_boot(num: int):
 
 
 def main(args):
-    logging.basicConfig(level=logging.getLevelName(args.log_level))
+    # https://stackoverflow.com/a/44401529
+    logging.basicConfig(
+        format="%(asctime)s,%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
+        datefmt="%Y-%m-%d:%H:%M:%S",
+        level=logging.getLevelName(args.log_level),
+    )
     with pmem(), network(args.num), ExitStack() as stack:
         vms = [
             stack.enter_context(create_vm(i, args.ncpus, args.mem, args.dram_ratio))
