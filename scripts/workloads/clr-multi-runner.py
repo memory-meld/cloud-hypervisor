@@ -2,17 +2,20 @@
 import os
 from itertools import product
 from subprocess import run
-from datetime import now
+from datetime import datetime
 from pathlib import Path
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 
 
 if __name__ == "__main__":
-    isotime = now().isoformat()
+    isotime = datetime.now().isoformat()
     outdir = Path(f"{SCRIPT_DIR}/{isotime}")
     outdir.mkdir(parents=True, exist_ok=True)
-    for (num, ratio) in product(range(1, 19), range(0.0, 1.125, 0.125)):
+    for (num, ratio) in product(
+        range(1, 19),
+        map(lambda x: x / 8.0, range(9)),
+    ):
         with open(f"{outdir}/redis-ycsb-a-{num}-4-8-{ratio:.3f}.log", "w") as log:
             run(
                 [
