@@ -3,6 +3,7 @@ import argparse
 import time
 from contextlib import ExitStack, contextmanager
 from functools import reduce
+import logging
 from logging import info
 from pathlib import Path
 from subprocess import DEVNULL, PIPE, Popen, check_output, run
@@ -10,7 +11,7 @@ from typing import List, Tuple
 
 from numa.info import node_to_cpus
 
-# pip3 install --upgrade libvirt-python py-libnuma humanfriendly
+# pip3 install --upgrade libvirt-python py-libnuma
 
 
 DEFAULT_IMAGE = "clr.img"
@@ -147,6 +148,12 @@ def network(num: int = 40):
 def pmem():
     """Convert all devdax PMEM into system ram."""
     run(
+        "echo 3 | sudo tee /proc/sys/vm/drop_caches",
+        shell=True,
+        capture_output=True,
+        check=True,
+    )
+    run(
         ["sudo", "daxctl", "reconfigure-device", "--human", "--mode=system-ram", "all"],
         capture_output=True,
         check=True,
@@ -160,7 +167,7 @@ def pmem():
 
 
 @contextmanager
-def create_vm(id: int, ncpus: int = 4, mem: int = 8 << 30):
+def create_vm(id: int, ncpus: int = 4, mem: int = 8 << 30, dram_ratio=0.5):
     r"""
     Start a vm.
 
@@ -174,6 +181,8 @@ def create_vm(id: int, ncpus: int = 4, mem: int = 8 << 30):
     host_cpus = ",".join(map(str, node_to_cpus(0)))
     affinity = ",".join([f"{i}@[{host_cpus}]" for i in range(ncpus)])
     mac = get_mac(id)
+    dram = int(mem * dram_ratio)
+    pmem = mem - dram
     fs_args = [
         VIRTIOFSD,
         "--cache=never",
@@ -197,7 +206,7 @@ def create_vm(id: int, ncpus: int = 4, mem: int = 8 << 30):
         "--net",
         f"tap=ich{id},mac={mac}",
         "--balloon",
-        f"size=[{mem//2},{mem//2}],statistics=on,heterogeneous_memory=on",
+        f"size=[{dram},{pmem}],statistics=on,heterogeneous_memory=on",
         "--memory",
         "size=0,shared=on",
         "--memory-zone",
@@ -255,8 +264,8 @@ def subcmd_redis(args, vms: List[Popen]):
     ]
     for id in range(args.num):
         # launch redis with preloaded ycsb keys in the background
-        ssh_cmd(id, server_args)
-    # wait for boot
+        ssh_cmd(id, server_args, stderr=DEVNULL)
+    info("all redis servers started")
     # wait for loading
     while not reduce(
         bool.__and__,
@@ -305,6 +314,7 @@ def subcmd_redis(args, vms: List[Popen]):
         print(out)
         print(f"vm{i} stderr:")
         print(err)
+    info(f"redis ycsb-{args.workload} workload complelte")
 
 
 # return (stdout, stderr) of all subprocesses
@@ -330,9 +340,10 @@ def wait_for_boot(num: int):
 
 
 def main(args):
+    logging.basicConfig(logging.getLevelName(args.log_level))
     with pmem(), network(args.num), ExitStack() as stack:
         vms = [
-            stack.enter_context(create_vm(i, args.ncpus, args.mem))
+            stack.enter_context(create_vm(i, args.ncpus, args.mem, args.dram_ratio))
             for i in range(args.num)
         ]
         wait_for_boot(args.num)
@@ -342,7 +353,7 @@ def main(args):
             case "redis":
                 subcmd_redis(args, vms)
             case _:
-                print(f"not implemented subcmd: {args.subcmd}")
+                assert False, f"subcmd not implemented: {args.subcmd}"
 
 
 if __name__ == "__main__":
@@ -363,6 +374,21 @@ if __name__ == "__main__":
         type=int,
         default=8 << 30,
         help="How memory in byte for each VM, defaults to 8G",
+    )
+    parser.add_argument(
+        "--dram-ratio",
+        "-d",
+        type=float,
+        default=0.5,
+        help="Initial DRAM ratio out of all system-ram, defaults to 0.5",
+    )
+    parser.add_argument(
+        "--log-level",
+        "-l",
+        default="INFO",
+        type=str.upper,
+        choices=["FATAL", "ERROR", "WARNING", "WARN", "INFO", "DEBUG", "NOTSET"],
+        help="Logging level, defaults to INFO",
     )
     # https://stackoverflow.com/a/4575792
     subcmd = parser.add_subparsers(
