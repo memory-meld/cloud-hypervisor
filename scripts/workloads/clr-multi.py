@@ -281,7 +281,7 @@ def subcmd_redis(args, vms: List[Popen]):
         ),
     ):
         time.sleep(1)
-    info("YCSB preload complelte")
+    info("ycsb preload complelte")
     # run ycsb on node 1 to prevent interference with VM running on node 0
 
     ycsb_args = [
@@ -315,10 +315,7 @@ def subcmd_redis(args, vms: List[Popen]):
         for id in range(args.num)
     ]
     for i, (out, err) in enumerate(wait_for_exit(jobs)):
-        print(f"vm{i} stdout:")
-        print(out)
-        print(f"vm{i} stderr:")
-        print(err)
+        print(f"vm{i} stdout:\n{out}\nvm{i} stderr:\n{err}")
     info(f"redis ycsb-{args.workload} workload complelte")
 
 
@@ -410,7 +407,7 @@ if __name__ == "__main__":
         "-w",
         default="a",
         choices=["a", "b", "c", "d", "e", "f"],
-        help="Which YCSB workload to run on redis, defaults to a",
+        help="Which ycsb workload to run on redis, defaults to a",
     )
     mix_parser = subcmd.add_parser("mix")
     manual_parser = subcmd.add_parser("manual")
