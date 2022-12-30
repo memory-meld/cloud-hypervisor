@@ -67,7 +67,7 @@ DEFAULT_NETWORK_CONFIG = """
     </network>
 """
 YCSB_RECORD_COUNT = 3000000
-YCSB_OPERATION_COUNT = 10000000
+YCSB_OPERATION_COUNT = 5000000
 YCSB_PRELOADED = f"ycsb-{YCSB_RECORD_COUNT}.rdb"
 YCSB_A_ARGS = [
     "-p",
@@ -207,7 +207,7 @@ def create_vm(id: int, ncpus: int = 4, mem: int = 8 << 30, dram_ratio=0.5):
         "--net",
         f"tap=ich{id},mac={mac}",
         "--balloon",
-        f"size=[{dram},{pmem}],statistics=on,heterogeneous_memory=on",
+        f"size=[{mem-dram},{mem-pmem}],statistics=on,heterogeneous_memory=on",
         "--memory",
         "size=0,shared=on",
         "--memory-zone",
@@ -271,6 +271,8 @@ def subcmd_redis(args, vms: List[Popen]):
         # launch redis with preloaded ycsb keys in the background
         ssh_cmd(id, server_args, stderr=DEVNULL)
     info("all redis servers started")
+    # redis taks at least 30s to load the data, we can try to query dbsize later
+    time.sleep(15)
     # wait for loading
     while not reduce(
         bool.__and__,
