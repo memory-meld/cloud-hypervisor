@@ -45,6 +45,7 @@ CLOUD_HYPERVISOR = DEFAULT_TEST_DIR + "/base/cloud-hypervisor"
 VIRTIOFSD = DEFAULT_TEST_DIR + "/base/virtiofsd"
 CH_REMOTE = DEFAULT_TEST_DIR + "/base/ch-remote"
 GO_YCSB = DEFAULT_TEST_DIR + "/base/go-ycsb"
+MODULES_DIR = DEFAULT_TEST_DIR + "/base"
 DEFAULT_SSH_ARGS = [
     "ssh",
     "-o",
@@ -251,10 +252,12 @@ def ssh_cmd(id: int, args: List[str], **kwargs) -> str:
 
 
 def subcmd_redis(args, vms: List[Popen]):
-    server_args = [
+    tmux_args = [
         "tmux",
         "new",
         "-d",
+    ]
+    server_args = [
         "redis-server",
         "--save",
         "",
@@ -267,6 +270,23 @@ def subcmd_redis(args, vms: List[Popen]):
         "--dir",
         DEFAULT_TEST_DIR,
     ]
+    perf_args = (
+        [
+            "sudo",
+            "perf",
+            "record",
+            "--all-user",
+            "--phys-data",
+            "--data",
+            "-z",
+            "-vv",
+            "-e",
+            "r80d1:P",
+        ]
+        if args.perf
+        else []
+    )
+    server_args = tmux_args + perf_args + server_args
     for id in range(args.num):
         # launch redis with preloaded ycsb keys in the background
         ssh_cmd(id, server_args, stderr=DEVNULL)
@@ -307,7 +327,7 @@ def subcmd_redis(args, vms: List[Popen]):
         case _:
             assert False, f"Workload not implemented yet: {args.workload}"
 
-    jobs = [
+    ycsb_clients = [
         Popen(
             ycsb_args + ["-p", f"redis.addr={get_ip(id)}:6379"],
             cwd=get_cwd(id),
@@ -316,8 +336,26 @@ def subcmd_redis(args, vms: List[Popen]):
         )
         for id in range(args.num)
     ]
-    for i, (out, err) in enumerate(wait_for_exit(jobs)):
+    for i, (out, err) in enumerate(wait_for_exit(ycsb_clients)):
         print(f"vm{i} stdout:\n{out}\nvm{i} stderr:\n{err}")
+    for i in range(args.num):
+        ssh_cmd(i, ["sudo", "pkill", "redis-server"])
+    if args.perf:
+        for i in range(args.num):
+            perf_script_out = ssh_cmd(
+                i,
+                [
+                    "sudo",
+                    "perf",
+                    "--no-pager",
+                    "script",
+                    "--header",
+                    f"--input={PROJECT_DIR}/../perf.data"
+                    # "-F",
+                    # "tid,time,ip,sym,addr,event,phys_addr",
+                ],
+            )
+            print(f"vm{i} perf script:\n{perf_script_out}")
     info(f"redis ycsb-{args.workload} workload complelte")
 
 
@@ -333,13 +371,23 @@ def wait_for_exit(subprocesses: List[Popen]) -> List[Tuple[str, str]]:
     ]
 
 
+def insmod(num: int):
+    modules = ["balloon_events.ko", "virtio_balloon.ko"]
+    module_args = [[], ["pebs_enabled=false"]]
+    for id in range(num):
+        for mod, args in zip(modules, module_args):
+            ssh_cmd(id, ["sudo", "insmod", f"{MODULES_DIR}/{mod}"] + args)
+    info("balloon module installed")
+
+
 def wait_for_boot(num: int):
-    for i in range(num):
+    for id in range(num):
         check_output(
-            f"until {' '.join(DEFAULT_SSH_ARGS)} {get_ip(i)} uname -a; do sleep 1; done",
+            f"until {' '.join(DEFAULT_SSH_ARGS)} {get_ip(id)} uname -a; do sleep 1; done",
             shell=True,
             stderr=DEVNULL,
         )
+
     info("all VM booted")
 
 
@@ -356,6 +404,7 @@ def main(args):
             for i in range(args.num)
         ]
         wait_for_boot(args.num)
+        insmod(args.num)
         match args.subcmd:
             case "manual":
                 wait_for_exit(vms)
@@ -398,6 +447,13 @@ if __name__ == "__main__":
         type=str.upper,
         choices=["FATAL", "ERROR", "WARNING", "WARN", "INFO", "DEBUG", "NOTSET"],
         help="Logging level, defaults to INFO",
+    )
+    parser.add_argument(
+        "--perf",
+        "-p",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help="Debug perf",
     )
     # https://stackoverflow.com/a/4575792
     subcmd = parser.add_subparsers(
