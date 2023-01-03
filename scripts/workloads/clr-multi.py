@@ -8,6 +8,7 @@ from logging import info
 from pathlib import Path
 from subprocess import DEVNULL, PIPE, Popen, check_output, run
 from typing import List, Tuple
+from itertools import cycle, islice
 
 from numa.info import node_to_cpus
 
@@ -86,6 +87,12 @@ YCSB_A_ARGS = [
     "-p",
     "requestdistribution=uniform",
 ]
+HOST_CPU_CYCLER = cycle(node_to_cpus(0))
+
+
+def take(n, iterable):
+    "Return first n items of the iterable as a list"
+    return list(islice(iterable, n))
 
 
 def get_cwd(id: int) -> str:
@@ -179,8 +186,12 @@ def create_vm(id: int, ncpus: int = 4, mem: int = 8 << 30, dram_ratio=0.5):
     [`contextlib.ExitStack()`](https://stackoverflow.com/a/45681273).
     """
     cwd = get_cwd(id)
-    host_cpus = ",".join(map(str, node_to_cpus(0)))
-    affinity = ",".join([f"{i}@[{host_cpus}]" for i in range(ncpus)])
+    affinity = ",".join(
+        [
+            f"{guest_cpu}@[{host_cpu}]"
+            for guest_cpu, host_cpu in enumerate(take(ncpus, HOST_CPU_CYCLER))
+        ]
+    )
     mac = get_mac(id)
     assert 0.0 <= dram_ratio <= 1.0, f"Unexpected dram_ratio: {dram_ratio}"
     dram = int(mem * dram_ratio)
@@ -227,6 +238,7 @@ def create_vm(id: int, ncpus: int = 4, mem: int = 8 << 30, dram_ratio=0.5):
     finally:
         ch.terminate()
         out, err = wait_for_exit([ch])[0]
+        print(f"vm{id} cloud-hypervisor args:\n{ch_args}")
         print(
             f"vm{id} cloud-hypervisor stdout:\n{out}\nvm{id} cloud-hypervisor stderr:\n{err}"
         )
