@@ -175,7 +175,7 @@ def pmem():
 
 
 @contextmanager
-def create_vm(id: int, ncpus: int = 4, mem: int = 8 << 30, dram_ratio=0.5):
+def create_vm(id: int, ncpus: int = 4, mem: int = 8 << 30, dram_ratio=0.5, memory_mode=False):
     r"""
     Start a vm.
 
@@ -196,6 +196,8 @@ def create_vm(id: int, ncpus: int = 4, mem: int = 8 << 30, dram_ratio=0.5):
     assert 0.0 <= dram_ratio <= 1.0, f"Unexpected dram_ratio: {dram_ratio}"
     dram = int(mem * dram_ratio)
     pmem = mem - dram
+    dram_node = 0
+    pmem_node = 0 if memory_mode else 2
     fs_args = [
         VIRTIOFSD,
         "--cache=never",
@@ -223,8 +225,8 @@ def create_vm(id: int, ncpus: int = 4, mem: int = 8 << 30, dram_ratio=0.5):
         "--memory",
         "size=0,shared=on",
         "--memory-zone",
-        f"size={mem},shared=on,host_numa_node=0,id=fast",
-        f"size={mem},shared=on,host_numa_node=2,id=slow",
+        f"size={mem},shared=on,host_numa_node={dram_node},id=fast",
+        f"size={mem},shared=on,host_numa_node={pmem_node},id=slow",
         "--numa",
         f"guest_numa_id=0,cpus=0-{ncpus-1},memory_zones=fast",
         "guest_numa_id=1,memory_zones=slow",
@@ -287,13 +289,14 @@ def subcmd_redis(args, vms: List[Popen]):
             "sudo",
             "perf",
             "record",
+            "--count=1",
             "--all-user",
             "--phys-data",
             "--data",
             "-z",
             "-vv",
             "-e",
-            "r80d1:P",
+            args.perf,
         ]
         if args.perf
         else []
@@ -350,9 +353,9 @@ def subcmd_redis(args, vms: List[Popen]):
     ]
     for i, (out, err) in enumerate(wait_for_exit(ycsb_clients)):
         print(f"vm{i} stdout:\n{out}\nvm{i} stderr:\n{err}")
-    for i in range(args.num):
-        ssh_cmd(i, ["sudo", "pkill", "redis-server"])
     if args.perf:
+        for i in range(args.num):
+            ssh_cmd(i, ["sudo", "pkill", "redis-server"])
         for i in range(args.num):
             perf_script_out = ssh_cmd(
                 i,
@@ -381,6 +384,12 @@ def wait_for_exit(subprocesses: List[Popen]) -> List[Tuple[str, str]]:
         )
         for (out, err) in map(Popen.communicate, subprocesses)
     ]
+
+
+def numa_balancing(num: int, on: bool = False):
+    for id in range(num):
+        ssh_cmd(id, ["sudo", "sysctl", "-w", f"kernel.numa_balancing={int(on)}"])
+    info(f"guest kernel.numa_balancing enabled: {on}")
 
 
 def insmod(num: int):
@@ -412,11 +421,12 @@ def main(args):
     )
     with pmem(), network(args.num), ExitStack() as stack:
         vms = [
-            stack.enter_context(create_vm(i, args.ncpus, args.mem, args.dram_ratio))
+            stack.enter_context(create_vm(i, args.ncpus, args.mem, args.dram_ratio, args.memory_mode))
             for i in range(args.num)
         ]
         wait_for_boot(args.num)
         insmod(args.num)
+        numa_balancing(args.num, False)
         match args.subcmd:
             case "manual":
                 wait_for_exit(vms)
@@ -463,9 +473,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--perf",
         "-p",
+        default=None,
+        type=str,
+        help="Enable perf events collection in guests",
+    )
+    parser.add_argument(
+        "--memory-mode",
+        "-t",
         default=False,
-        action=argparse.BooleanOptionalAction,
-        help="Debug perf",
+        type=bool,
+        action="store_true",
+        help="Enable memory mode",
     )
     # https://stackoverflow.com/a/4575792
     subcmd = parser.add_subparsers(
