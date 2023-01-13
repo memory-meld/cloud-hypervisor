@@ -2,11 +2,12 @@ from contextlib import ExitStack, contextmanager
 from itertools import cycle
 from logging import info
 from pathlib import Path
-from subprocess import DEVNULL, PIPE, Popen, check_output
+from subprocess import DEVNULL, PIPE, Popen, check_output, run
 from time import sleep
 from typing import Iterable, List
 
 from numa.info import node_to_cpus
+
 # from rich import print
 
 from .config import (CLOUD_HYPERVISOR, DEFAULT_CMDLINE, DEFAULT_IMAGE,
@@ -148,12 +149,14 @@ class Vm:
             pass
         # print("vm cleaned up")
 
-    def ssh(self, args: List[str], **kwargs) -> str:
+    def ssh(self, args: List[str], check=True, stdout=PIPE, **kwargs) -> str:
         """Run commands via SSH in the `id`-th VM."""
-        return check_output(
+        return run(
             DEFAULT_SSH_ARGS + [self.ip()] + args,
+            check=check,
+            stdout=stdout,
             **kwargs,
-        ).decode("utf-8")
+        ).stdout.decode("utf-8")
 
     def wait_for_boot(self):
         ssh = " ".join(DEFAULT_SSH_ARGS + [self.ip(), "uname", "-a"])
@@ -172,7 +175,6 @@ class Vm:
 
     def __exit__(self, exc_type, exc_value, tb):
         self.kill()
-        return True
 
 
 def insmod(vms: List[Vm]):

@@ -91,11 +91,12 @@ def host_cpu_cycler():
     return cycle(node_to_cpus(0))
 
 
-ENV_SETUP_CMDS = dict(
+ENV_SETUP_SCRIPTS = dict(
     pmem="sudo daxctl reconfigure-device --human --mode=system-ram all",
     network="sudo systemctl --no-pager --full start libvirtd",
-    cpu="echo 3000000 | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq",
+    freq="echo 3000000 | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq",
     numa="sudo sysctl -w kernel.numa_balancing=0",
+    swap="sudo swapon --noheadings --show=NAME | xargs -n1 sudo swapoff",
 )
 
 VCPUBind = Enum("VCPUBind", ["CORE", "NODE"])

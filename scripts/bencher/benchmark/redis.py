@@ -47,7 +47,7 @@ def redis(opt: Opt, vms: List[Vm]):
         "-e",
     ]
     redis_server = tmux + ((perf + [opt.perf]) if opt.perf else []) + redis_server
-    info(redis_server)
+    # info(redis_server)
     # launch redis with preloaded ycsb keys in the background
     ssh_all(vms, redis_server, stderr=DEVNULL)
     info("all redis servers started")
@@ -57,7 +57,7 @@ def redis(opt: Opt, vms: List[Vm]):
     while not reduce(
         bool.__and__,
         map(
-            lambda vm: vm.ssh(["redis-cli", "dbsize"], stderr=DEVNULL).strip()
+            lambda vm: vm.ssh(["redis-cli", "dbsize"], stderr=DEVNULL, check=False).strip()
             == f"{YCSB_RECORD_COUNT}",
             vms,
         ),
