@@ -6,7 +6,7 @@ from subprocess import DEVNULL, PIPE, Popen
 from typing import List
 
 from numa.info import node_to_cpus
-from rich import print
+# from rich import print
 
 from ..config import (GO_YCSB, PROJECT_DIR, YCSB_OPERATION_COUNT,
                       YCSB_PRELOADED, YCSB_RECORD_COUNT, YCSB_WORKLOAD_ARGS)

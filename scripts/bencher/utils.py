@@ -10,13 +10,13 @@ from rich.logging import RichHandler
 from .opt import LogLevel
 
 
-def log(level: LogLevel = LogLevel.WARNING):
+def log(level: LogLevel = LogLevel.WARNING, pretty: bool = False):
     # https://stackoverflow.com/a/44401529
     logging.basicConfig(
         format="%(asctime)s,%(msecs)03d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
         datefmt="%Y-%m-%d:%H:%M:%S",
         level=level.name,
-        handlers=[RichHandler()],
+        handlers=[RichHandler()] if pretty else None,
     )
 
 

@@ -7,7 +7,7 @@ from time import sleep
 from typing import Iterable, List
 
 from numa.info import node_to_cpus
-from rich import print
+# from rich import print
 
 from .config import (CLOUD_HYPERVISOR, DEFAULT_CMDLINE, DEFAULT_IMAGE,
                      DEFAULT_KERNEL, DEFAULT_SSH_ARGS, MODULES_DIR, SHARED_DIR,

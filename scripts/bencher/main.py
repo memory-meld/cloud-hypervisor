@@ -1,6 +1,5 @@
 from logging import info
 
-from rich import print
 
 from .benchmark.redis import redis
 from .config import Benchmark, host_cpu_cycler
@@ -11,7 +10,7 @@ from .vm import Vm, insmod, launch_vms, numa_balancing
 
 def main(opt: Opt):
     # https://stackoverflow.com/a/44401529
-    log(opt.log_level)
+    log(opt.log_level, opt.pretty)
     with launch_vms(
         opt.num,
         ncpus=opt.ncpus,

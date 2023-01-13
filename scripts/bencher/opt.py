@@ -74,6 +74,7 @@ class Opt:
     perf: str = c(help="Enable perf events collection in guests")
     memory_mode: bool = c(help="Enable memory mode")
     bench: Benchmark = c(
+        default=Benchmark.MANUAL,
         type=Benchmark,
         action=EnumAction,
         help="Benchmark to run",
@@ -84,3 +85,4 @@ class Opt:
         action=EnumAction,
         help="Which ycsb workload to run on redis",
     )
+    pretty: bool = c(help="Enable pretty printing using rich")

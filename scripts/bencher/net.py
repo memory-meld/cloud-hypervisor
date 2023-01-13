@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from subprocess import DEVNULL, PIPE, Popen, check_output
+from subprocess import check_output
 from typing import List
 
 import libvirt
