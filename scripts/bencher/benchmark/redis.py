@@ -69,8 +69,9 @@ def redis(opt: Opt, vms: List[Vm]):
     go_ycsb = [
         "numactl",
         "--physcpubind=" + ",".join(map(str, node_to_cpus(1))),
+        f"--membind={0 if opt.memory_mode else 2}",
+        "--"
     ]
-    go_ycsb += [] if opt.memory_mode else ["--membind=1"]
     go_ycsb += [
         GO_YCSB,
         "run",
