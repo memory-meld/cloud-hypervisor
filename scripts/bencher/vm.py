@@ -1,26 +1,17 @@
 from contextlib import ExitStack, contextmanager
+from itertools import cycle
 from logging import info
 from pathlib import Path
 from subprocess import DEVNULL, PIPE, Popen, check_output
 from time import sleep
-from typing import List, Iterable
-from itertools import cycle
+from typing import Iterable, List
 
 from numa.info import node_to_cpus
 from rich import print
 
-from .config import (
-    CLOUD_HYPERVISOR,
-    DEFAULT_CMDLINE,
-    DEFAULT_IMAGE,
-    DEFAULT_KERNEL,
-    DEFAULT_SSH_ARGS,
-    MODULES_DIR,
-    SHARED_DIR,
-    VIRTIOFSD,
-    VM_WORKING_DIR,
-    VCPUBind,
-)
+from .config import (CLOUD_HYPERVISOR, DEFAULT_CMDLINE, DEFAULT_IMAGE,
+                     DEFAULT_KERNEL, DEFAULT_SSH_ARGS, MODULES_DIR, SHARED_DIR,
+                     VIRTIOFSD, VM_WORKING_DIR, VCPUBind)
 from .utils import take, wait_for_exit
 
 

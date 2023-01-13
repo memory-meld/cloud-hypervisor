@@ -9,3 +9,6 @@ scripts/workloads/*.tgz
 scripts/workloads/*ycsb*
 scripts/workloads/cockroach*/
 scripts/workloads/gbbs/
+scripts/workloads/**/202*/
+scripts/workloads/**/*.csv
+**/__pycache__/

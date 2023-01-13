@@ -1,11 +1,12 @@
 from logging import info
+
 from rich import print
 
+from .benchmark.redis import redis
+from .config import Benchmark, host_cpu_cycler
 from .opt import Opt
 from .utils import log
-from .vm import launch_vms, insmod, numa_balancing, Vm
-from .config import host_cpu_cycler, Benchmark
-from .benchmark.redis import redis
+from .vm import Vm, insmod, launch_vms, numa_balancing
 
 
 def main(opt: Opt):

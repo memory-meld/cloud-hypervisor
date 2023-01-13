@@ -1,6 +1,6 @@
 import argparse
 import enum
-from typing import Any 
+from typing import Any
 
 from classopt import classopt
 from classopt import config as c
