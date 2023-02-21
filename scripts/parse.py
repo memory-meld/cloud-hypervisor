@@ -1,7 +1,8 @@
-from tap import Tap
-from pathlib import Path
 import re
+from pathlib import Path
+
 from rich import print
+from tap import Tap
 
 
 class Args(Tap):

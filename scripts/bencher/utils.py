@@ -1,13 +1,11 @@
-import argparse
-import enum
 import logging
 from itertools import islice
 from subprocess import Popen
-from typing import Any, Iterable, List, Tuple
+from typing import Iterable, List, Tuple
 
 from rich.logging import RichHandler
 
-from .opt import LogLevel
+from .config import LogLevel
 
 
 def log(level: LogLevel = LogLevel.WARNING, pretty: bool = False):

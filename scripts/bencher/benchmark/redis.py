@@ -1,3 +1,4 @@
+# fmt: off
 import time
 from functools import reduce
 from logging import info
@@ -7,39 +8,13 @@ from typing import List
 
 from numa.info import node_to_cpus
 
-# from rich import print
-
-from ..config import (
-    GO_YCSB,
-    PROJECT_DIR,
-    YCSB_OPERATION_COUNT,
-    YCSB_PRELOADED,
-    YCSB_RECORD_COUNT,
-    YCSB_WORKLOAD_ARGS,
-    CLIENT_CPU_NODE,
-    DRAM_NODE,
-    PMEM_NODE,
-    YcsbWorkload,
-)
+from ..config import (CLIENT_CPU_NODE, DRAM_NODE, GO_YCSB, PMEM_NODE,
+                      PROJECT_DIR, YCSB_OPERATION_COUNT, YCSB_PRELOADED,
+                      YCSB_RECORD_COUNT, YCSB_WORKLOAD_ARGS, YcsbWorkload)
 from ..utils import wait_for_exit_all
 from ..vm import Vm, ssh_all
 
-
-# class Redis:
-#     def load(self, vmid: int, perf_event: Optional[str]) -> List[str]:
-#         args = ["tmux", "new", "-d", "redis-server"]
-#         args += ["--save", "", "--appendonly", "no", "--protected-mode", "no"]
-#         args += ["--dbfilename", YCSB_PRELOADED, "--dir", PROJECT_DIR]
-#         if perf_event:
-#             args += ["sudo", "perf", "record", "--all-user", "--phys-data", "--data"]
-#             args += ["-z", "-vv", "-e", perf_event]
-#         return args
-
-#     def loaded(self, vmid: int) -> List[str]:
-#         return ["test", f"{YCSB_RECORD_COUNT}", "-eq", "'$(redis-cli dbsize)'"]
-
-#     def run(self, vmid: int) -> List[str]:
-#         pass
+# fmt: on
 
 
 def redis(
@@ -121,3 +96,20 @@ def redis(
         for i, out in enumerate(ssh_all(vms, perf_script)):
             print(f"vm{i} perf script:\n{out}")
     info(f"redis ycsb-{workload.name} workload complete")
+
+
+# class Redis:
+#     def load(self, vmid: int, perf_event: Optional[str]) -> List[str]:
+#         args = ["tmux", "new", "-d", "redis-server"]
+#         args += ["--save", "", "--appendonly", "no", "--protected-mode", "no"]
+#         args += ["--dbfilename", YCSB_PRELOADED, "--dir", PROJECT_DIR]
+#         if perf_event:
+#             args += ["sudo", "perf", "record", "--all-user", "--phys-data", "--data"]
+#             args += ["-z", "-vv", "-e", perf_event]
+#         return args
+
+#     def loaded(self, vmid: int) -> List[str]:
+#         return ["test", f"{YCSB_RECORD_COUNT}", "-eq", "'$(redis-cli dbsize)'"]
+
+#     def run(self, vmid: int) -> List[str]:
+#         pass

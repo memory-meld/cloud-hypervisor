@@ -1,3 +1,4 @@
+# fmt: off
 from contextlib import ExitStack, contextmanager
 from itertools import cycle
 from logging import info
@@ -8,24 +9,13 @@ from typing import Iterable, List
 
 from numa.info import node_to_cpus
 
-# from rich import print
-
-from .config import (
-    CLOUD_HYPERVISOR,
-    DEFAULT_CMDLINE,
-    DEFAULT_IMAGE,
-    DEFAULT_KERNEL,
-    DEFAULT_SSH_ARGS,
-    MODULES_DIR,
-    SHARED_DIR,
-    VIRTIOFSD,
-    VM_WORKING_DIR,
-    VCPUBind,
-    VM_CPU_NODE,
-    DRAM_NODE,
-    PMEM_NODE,
-)
+from .config import (CLOUD_HYPERVISOR, DEFAULT_CMDLINE, DEFAULT_IMAGE,
+                     DEFAULT_KERNEL, DEFAULT_SSH_ARGS, DRAM_NODE, MODULES_DIR,
+                     PMEM_NODE, SHARED_DIR, VIRTIOFSD, VM_CPU_NODE,
+                     VM_WORKING_DIR, VCPUBind)
 from .utils import take, wait_for_exit
+
+# fmt: on
 
 
 class Vm:
@@ -38,7 +28,7 @@ class Vm:
     cpu_cycler: Iterable[int]
     virtiofsd: Popen
     cloud_hypervisor: Popen
-    ch_args: List[str] = None
+    ch_args: List[str] = []
 
     def __init__(
         self,
@@ -69,7 +59,7 @@ class Vm:
 
     def virtiofsd_args(self) -> List[str]:
         return [
-            VIRTIOFSD,
+            str(VIRTIOFSD),
             "--cache=never",
             "--socket-path=virtiofsd.socket",
             f"--shared-dir={SHARED_DIR}",
@@ -99,7 +89,7 @@ class Vm:
         return DRAM_NODE if self.memory_mode else PMEM_NODE
 
     def cloud_hypervisor_args(self) -> List[str]:
-        if self.ch_args is None:
+        if not self.ch_args:
             self.ch_args = list(
                 map(
                     str,

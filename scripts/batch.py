@@ -1,13 +1,12 @@
-from contextlib import contextmanager, redirect_stdout, redirect_stderr
-from logging import info
-from pathlib import Path
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import datetime
 from itertools import product
+from logging import info
+from pathlib import Path
 from subprocess import check_output
 
+from bencher import ENV_SETUP_SCRIPTS, Args, Bench, main
 from rich import inspect, print
-
-from bencher import main, Args, Bench, ENV_SETUP_SCRIPTS
 
 
 @contextmanager
