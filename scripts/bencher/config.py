@@ -1,9 +1,7 @@
-import atexit
 from enum import Enum
 from itertools import cycle
 from pathlib import Path
 
-import libvirt
 from numa.info import node_to_cpus
 
 DEFAULT_IMAGE = "clr.img"
@@ -22,7 +20,7 @@ DEFAULT_CMDLINE = " ".join(
         "cryptomgr.notests",
         "quiet",
         "init=/usr/lib/systemd/systemd-bootchart",
-        "initcall_debug",
+        # "initcall_debug",
         "no_timer_check",
         "tsc=reliable",
         "noreplace-smp",
@@ -34,7 +32,7 @@ DEFAULT_CMDLINE = " ".join(
 # this dir is mapped to the guest for easy access to supplementary data
 PROJECT_DIR = Path.home() / "Projects/ch-test"
 SHARED_DIR = PROJECT_DIR / ".."
-CLOUD_HYPERVISOR = PROJECT_DIR / "base/cloud-hypervisor"
+CLOUD_HYPERVISOR = SHARED_DIR / "cloud-hypervisor/target/release/cloud-hypervisor"
 VIRTIOFSD = PROJECT_DIR / "base/virtiofsd"
 CH_REMOTE = PROJECT_DIR / "base/ch-remote"
 GO_YCSB = PROJECT_DIR / "base/go-ycsb"
@@ -87,8 +85,14 @@ YCSB_WORKLOAD_ARGS = dict(
 )
 
 
+VM_CPU_NODE = 1
+CLIENT_CPU_NODE = 0
+DRAM_NODE = 1
+PMEM_NODE = 2
+
+
 def host_cpu_cycler():
-    return cycle(node_to_cpus(0))
+    return cycle(node_to_cpus(VM_CPU_NODE))
 
 
 ENV_SETUP_SCRIPTS = dict(
@@ -96,18 +100,29 @@ ENV_SETUP_SCRIPTS = dict(
     network="sudo systemctl --no-pager --full start libvirtd",
     freq="echo 3000000 | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq",
     numa="sudo sysctl -w kernel.numa_balancing=0",
-    swap="sudo swapon --noheadings --show=NAME | xargs -n1 sudo swapoff",
+    swap="sudo swapon --noheadings --show=NAME | xargs -n1 sudo swapoff || true",
+    clean=f"fd -Ie socket . {PROJECT_DIR} -X rm",
 )
 
-VCPUBind = Enum("VCPUBind", ["CORE", "NODE"])
-Benchmark = Enum("Benchmark", ["MANUAL", "REDIS"])
-YcsbWorkload = Enum("YcsbWorkload", ["A", "B", "C", "D", "E", "F"])
+
+class VCPUBind(Enum):
+    CORE = "CORE"
+    NODE = "NODE"
+
+
+class YcsbWorkload(Enum):
+    A = "A"
+    B = "B"
+    C = "C"
+    D = "D"
+    E = "E"
+    F = "F"
 
 
 class LogLevel(Enum):
-    CRITICAL = 50
-    ERROR = 40
-    WARNING = 30
-    INFO = 20
-    DEBUG = 10
-    NOTSET = 0
+    CRITICAL = "CRITICAL"
+    ERROR = "ERROR"
+    WARNING = "WARNING"
+    INFO = "INFO"
+    DEBUG = "DEBUG"
+    NOTSET = "NOTSET"

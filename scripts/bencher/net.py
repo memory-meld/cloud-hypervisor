@@ -46,7 +46,7 @@ class Net:
 
 
 @contextmanager
-def network(vms: List[Vm]) -> Net:
+def network(vms: List[Vm]):
     net = Net()
     try:
         net.create_all(vms)

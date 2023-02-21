@@ -10,9 +10,21 @@ from numa.info import node_to_cpus
 
 # from rich import print
 
-from .config import (CLOUD_HYPERVISOR, DEFAULT_CMDLINE, DEFAULT_IMAGE,
-                     DEFAULT_KERNEL, DEFAULT_SSH_ARGS, MODULES_DIR, SHARED_DIR,
-                     VIRTIOFSD, VM_WORKING_DIR, VCPUBind)
+from .config import (
+    CLOUD_HYPERVISOR,
+    DEFAULT_CMDLINE,
+    DEFAULT_IMAGE,
+    DEFAULT_KERNEL,
+    DEFAULT_SSH_ARGS,
+    MODULES_DIR,
+    SHARED_DIR,
+    VIRTIOFSD,
+    VM_WORKING_DIR,
+    VCPUBind,
+    VM_CPU_NODE,
+    DRAM_NODE,
+    PMEM_NODE,
+)
 from .utils import take, wait_for_exit
 
 
@@ -36,7 +48,7 @@ class Vm:
         dram_ratio: float = 0.2,
         memory_mode: bool = False,
         vcpubind: VCPUBind = VCPUBind.CORE,
-        cpu_cycler: Iterable[int] = cycle(node_to_cpus(0)),
+        cpu_cycler: Iterable[int] = cycle(node_to_cpus(VM_CPU_NODE)),
     ):
         self.id = id
         self.ncpus = ncpus
@@ -68,7 +80,7 @@ class Vm:
             case VCPUBind.CORE:
                 ret = list(map(lambda x: [x], take(self.ncpus, self.cpu_cycler)))
             case VCPUBind.NODE:
-                ret = list(map(lambda _: node_to_cpus(0), range(self.ncpus)))
+                ret = list(map(lambda _: node_to_cpus(VM_CPU_NODE), range(self.ncpus)))
             case _:
                 assert False, "Unreachable code"
         return (
@@ -84,7 +96,7 @@ class Vm:
         return self.memory - self.dram()
 
     def pmem_node(self) -> int:
-        return 0 if self.memory_mode else 2
+        return DRAM_NODE if self.memory_mode else PMEM_NODE
 
     def cloud_hypervisor_args(self) -> List[str]:
         if self.ch_args is None:
@@ -112,7 +124,7 @@ class Vm:
                         "--memory",
                         "size=0,shared=on",
                         "--memory-zone",
-                        f"size={self.memory},shared=on,host_numa_node=0,id=fast",
+                        f"size={self.memory},shared=on,host_numa_node={DRAM_NODE},id=fast",
                         f"size={self.memory},shared=on,host_numa_node={self.pmem_node()},id=slow",
                         "--numa",
                         f"guest_numa_id=0,cpus=0-{self.ncpus-1},memory_zones=fast",
@@ -178,8 +190,8 @@ class Vm:
 
 
 def insmod(vms: List[Vm]):
-    modules = ["balloon_events.ko", "virtio_balloon.ko"]
-    module_args = [[], ["pebs_enabled=false"]]
+    modules = ["balloon_events.ko", "virtio_balloon.ko", "manual_events.ko"]
+    module_args = [[], ["pebs_enabled=false"], []]
     for vm in vms:
         for mod, args in zip(modules, module_args):
             vm.ssh(["sudo", "insmod", f"{MODULES_DIR}/{mod}"] + args)
@@ -197,7 +209,7 @@ def ssh_all(vms: List[Vm], args, **kwargs) -> List[str]:
 
 
 @contextmanager
-def launch_vms(nguests: int, **kwargs) -> List[Vm]:
+def launch_vms(nguests: int, **kwargs):
     from .net import network
 
     vms = [Vm(id, **kwargs) for id in range(nguests)]

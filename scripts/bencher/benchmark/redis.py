@@ -6,50 +6,58 @@ from subprocess import DEVNULL, PIPE, Popen
 from typing import List
 
 from numa.info import node_to_cpus
+
 # from rich import print
 
-from ..config import (GO_YCSB, PROJECT_DIR, YCSB_OPERATION_COUNT,
-                      YCSB_PRELOADED, YCSB_RECORD_COUNT, YCSB_WORKLOAD_ARGS)
-from ..opt import Opt
+from ..config import (
+    GO_YCSB,
+    PROJECT_DIR,
+    YCSB_OPERATION_COUNT,
+    YCSB_PRELOADED,
+    YCSB_RECORD_COUNT,
+    YCSB_WORKLOAD_ARGS,
+    CLIENT_CPU_NODE,
+    DRAM_NODE,
+    PMEM_NODE,
+    YcsbWorkload,
+)
 from ..utils import wait_for_exit_all
 from ..vm import Vm, ssh_all
 
 
-def redis(opt: Opt, vms: List[Vm]):
-    tmux = [
-        "tmux",
-        "new",
-        "-d",
-    ]
-    redis_server = [
-        "redis-server",
-        "--save",
-        "",
-        "--appendonly",
-        "no",
-        "--protected-mode",
-        "no",
-        "--dbfilename",
-        YCSB_PRELOADED,
-        "--dir",
-        PROJECT_DIR,
-    ]
-    perf = [
-        "sudo",
-        "perf",
-        "record",
-        "--count=1",
-        "--all-user",
-        "--phys-data",
-        "--data",
-        "-z",
-        "-vv",
-        "-e",
-    ]
-    redis_server = tmux + ((perf + [opt.perf]) if opt.perf else []) + redis_server
+# class Redis:
+#     def load(self, vmid: int, perf_event: Optional[str]) -> List[str]:
+#         args = ["tmux", "new", "-d", "redis-server"]
+#         args += ["--save", "", "--appendonly", "no", "--protected-mode", "no"]
+#         args += ["--dbfilename", YCSB_PRELOADED, "--dir", PROJECT_DIR]
+#         if perf_event:
+#             args += ["sudo", "perf", "record", "--all-user", "--phys-data", "--data"]
+#             args += ["-z", "-vv", "-e", perf_event]
+#         return args
+
+#     def loaded(self, vmid: int) -> List[str]:
+#         return ["test", f"{YCSB_RECORD_COUNT}", "-eq", "'$(redis-cli dbsize)'"]
+
+#     def run(self, vmid: int) -> List[str]:
+#         pass
+
+
+def redis(
+    vms: List[Vm],
+    workload: YcsbWorkload,
+    ncpus: int,
+    memory_mode: bool,
+    perf_event: str,
+):
+    args = ["tmux", "new", "-d", "redis-server"]
+    args += ["--save", "", "--appendonly", "no", "--protected-mode", "no"]
+    args += ["--dbfilename", YCSB_PRELOADED, "--dir", PROJECT_DIR]
+    if perf_event:
+        args += ["sudo", "perf", "record", "--all-user", "--phys-data", "--data"]
+        args += ["-z", "-vv", "-e", perf_event]
     # info(redis_server)
     # launch redis with preloaded ycsb keys in the background
-    ssh_all(vms, redis_server, stderr=DEVNULL)
+    ssh_all(vms, args, stderr=DEVNULL)
     info("all redis servers started")
     # redis taks at least 30s to load the data, we can try to query dbsize later
     time.sleep(15)
@@ -57,7 +65,9 @@ def redis(opt: Opt, vms: List[Vm]):
     while not reduce(
         bool.__and__,
         map(
-            lambda vm: vm.ssh(["redis-cli", "dbsize"], stderr=DEVNULL, check=False).strip()
+            lambda vm: vm.ssh(
+                ["redis-cli", "dbsize"], stderr=DEVNULL, check=False
+            ).strip()
             == f"{YCSB_RECORD_COUNT}",
             vms,
         ),
@@ -68,9 +78,9 @@ def redis(opt: Opt, vms: List[Vm]):
 
     go_ycsb = [
         "numactl",
-        "--physcpubind=" + ",".join(map(str, node_to_cpus(1))),
-        f"--membind={0 if opt.memory_mode else 2}",
-        "--"
+        "--physcpubind=" + ",".join(map(str, node_to_cpus(CLIENT_CPU_NODE))),
+        f"--membind={DRAM_NODE if memory_mode else PMEM_NODE}",
+        "--",
     ]
     go_ycsb += [
         GO_YCSB,
@@ -81,9 +91,9 @@ def redis(opt: Opt, vms: List[Vm]):
         "-p",
         f"operationcount={YCSB_OPERATION_COUNT}",
         "-p",
-        f"threadcount={opt.ncpus}",
+        f"threadcount={ncpus}",
     ]
-    go_ycsb += YCSB_WORKLOAD_ARGS[opt.workload.name]
+    go_ycsb += YCSB_WORKLOAD_ARGS[workload.name]
 
     ycsb_clients = [
         Popen(
@@ -96,7 +106,7 @@ def redis(opt: Opt, vms: List[Vm]):
     ]
     for i, (out, err) in enumerate(wait_for_exit_all(ycsb_clients)):
         print(f"vm{i} stdout:\n{out}\nvm{i} stderr:\n{err}")
-    if opt.perf:
+    if perf_event:
         perf_script = [
             "sudo",
             "perf",
@@ -110,4 +120,4 @@ def redis(opt: Opt, vms: List[Vm]):
         ssh_all(vms, ["sudo", "pkill", "redis-server"])
         for i, out in enumerate(ssh_all(vms, perf_script)):
             print(f"vm{i} perf script:\n{out}")
-    info(f"redis ycsb-{opt.workload.name} workload complete")
+    info(f"redis ycsb-{workload.name} workload complete")
