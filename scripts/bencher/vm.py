@@ -29,6 +29,7 @@ class Vm:
     virtiofsd: Popen
     cloud_hypervisor: Popen
     ch_args: List[str] = []
+    output_dir: Path
 
     def __init__(
         self,
@@ -39,6 +40,7 @@ class Vm:
         memory_mode: bool = False,
         vcpubind: VCPUBind = VCPUBind.CORE,
         cpu_cycler: Iterable[int] = cycle(node_to_cpus(VM_CPU_NODE)),
+        output_dir: Path = Path("/tmp/ch-out"),
     ):
         self.id = id
         self.ncpus = ncpus
@@ -47,6 +49,10 @@ class Vm:
         self.memory_mode = memory_mode
         self.vcpubind = vcpubind
         self.cpu_cycler = cpu_cycler
+        self.output_dir = output_dir.resolve() / str(id)
+        self.output_dir.mkdir( parents=True, exist_ok=True)
+        # self.stdout = open(self.output_dir / "stdout", "w+")
+        # self.stder = open(self.output_dir / "stderr", "w+")
 
     def cwd(self) -> Path:
         return VM_WORKING_DIR / f"vm{self.id}"
@@ -63,6 +69,14 @@ class Vm:
             "--cache=never",
             "--socket-path=virtiofsd.socket",
             f"--shared-dir={SHARED_DIR}",
+        ]
+
+    def virtiofsd_output_args(self) -> List[str]:
+        return [
+            str(VIRTIOFSD),
+            "--cache=never",
+            "--socket-path=virtiofsd-output.socket",
+            f"--shared-dir={self.output_dir}",
         ]
 
     def affinity(self, to_string=False) -> List[List[int]] | str:
@@ -103,6 +117,7 @@ class Vm:
                         DEFAULT_CMDLINE,
                         "--fs",
                         "tag=Projects,socket=virtiofsd.socket",
+                        "tag=Output,socket=virtiofsd-output.socket",
                         "--disk",
                         f"path={DEFAULT_IMAGE}",
                         "--cpus",
@@ -128,6 +143,9 @@ class Vm:
         self.virtiofsd = Popen(
             self.virtiofsd_args(), cwd=self.cwd(), stdout=PIPE, stderr=PIPE
         )
+        self.virtiofsd_output = Popen(
+            self.virtiofsd_output_args(), cwd=self.cwd(), stdout=PIPE, stderr=PIPE
+        )
         sleep(1)
         self.cloud_hypervisor = Popen(
             self.cloud_hypervisor_args(), cwd=self.cwd(), stdout=PIPE, stderr=PIPE
@@ -141,13 +159,21 @@ class Vm:
             f"vm{self.id} cloud-hypervisor stdout:\n{out}\nvm{self.id} cloud-hypervisor stderr:\n{err}"
         )
         self.virtiofsd.terminate()
+        self.virtiofsd_output.terminate()
         self.virtiofsd.wait()
+        self.virtiofsd_output.wait()
         try:
-            [
+            for f in [
+                "virtiofsd.socket",
+                "virtiofsd-output.socket",
+                "cloud-hypervisor.socket",
+            ]:
                 (self.cwd() / f).unlink()
-                for f in ["virtiofsd.socket", "cloud-hypervisor.socket"]
-            ]
+            self.output_dir.rmdir()
+            self.output_dir.parent.rmdir()
         except FileNotFoundError:
+            pass
+        except OSError:
             pass
         # print("vm cleaned up")
 
@@ -186,6 +212,15 @@ def insmod(vms: List[Vm]):
         for mod, args in zip(modules, module_args):
             vm.ssh(["sudo", "insmod", f"{MODULES_DIR}/{mod}"] + args)
     info("balloon module installed")
+
+
+def mount_fs(vms: List[Vm]):
+    tags = ["Projects", "Output"]
+    mount_points = ["/home/jlhu/Projects", "/home/jlhu/Output"]
+    for vm in vms:
+        for tag, mount_point in zip(tags, mount_points):
+            vm.ssh(["sudo", "mount", "-t", "virtiofs", tag, mount_point], check=False)
+    info("virtiofs mounted")
 
 
 def numa_balancing(vms: List[Vm], on: bool = False):

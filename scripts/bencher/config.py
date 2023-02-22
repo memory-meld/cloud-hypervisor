@@ -25,6 +25,7 @@ DEFAULT_CMDLINE = " ".join(
         "tsc=reliable",
         "noreplace-smp",
         "page_alloc.shuffle=1",
+        "modprobe.blacklist=balloon_events,virtio_balloon,manual_events",
     ]
 )
 

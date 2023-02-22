@@ -14,6 +14,7 @@ class RedisArgs(tap.Tap):
 
 class ManualArgs(tap.Tap):
     cmd: str = ""
+    wait: bool = False
 
 
 class Bench:
@@ -35,6 +36,7 @@ class Args(tap.Tap):
     perf_event: str = ""  # Enable perf events collection in guests
     memory_mode: bool = False  # Enable memory mode
     pretty: bool = False  # Enable pretty printing using rich
+    no_module: bool = False  # Disable inserting balloon related kernel modules
 
     def configure(self) -> None:
         # bench: Bench = Bench.MANUAL  # Benchmark to run
@@ -45,17 +47,21 @@ class Args(tap.Tap):
 
 
 def main(args: Args):
+    from datetime import datetime
     from logging import info
+    from pathlib import Path
 
     from .benchmark.gap import gap_bc
     from .benchmark.redis import redis
+    from .benchmark.manual import manual
     from .config import host_cpu_cycler
     from .utils import log
-    from .vm import Vm, insmod, launch_vms, numa_balancing
+    from .vm import insmod, mount_fs, launch_vms, numa_balancing
 
     # https://stackoverflow.com/a/44401529
     log(args.log_level, args.pretty)
     info(args)
+    ch_out = Path(__file__).parent / "output" / str(datetime.now().isoformat())
     with launch_vms(
         args.num,
         ncpus=args.ncpus,
@@ -64,14 +70,16 @@ def main(args: Args):
         memory_mode=args.memory_mode,
         vcpubind=args.bind,
         cpu_cycler=host_cpu_cycler(),
+        output_dir=ch_out,
     ) as vms:
         info("all vm started")
-        insmod(vms)
+        # mount_fs(vms)
+        if not args.no_module:
+            insmod(vms)
         numa_balancing(vms, False)
         match getattr(args, Bench.NAME):
             case Bench.MANUAL:
-                info("wait for manual termination via pkill cloud-hyperviso")
-                list(map(Vm.wait, vms))
+                manual(vms, args.cmd, args.wait)
             case Bench.REDIS:
                 info("benchmark to run: redis")
                 redis(vms, args.workload, args.ncpus, args.memory_mode, args.perf_event)
