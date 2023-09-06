@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::num::ParseIntError;
 use std::str::FromStr;
+use std::time::Duration;
 
 #[derive(Default)]
 pub struct OptionParser {
@@ -233,6 +234,40 @@ impl FromStr for ByteSizedList {
                 .map(|v| v.0)
                 .collect(),
         ))
+    }
+}
+
+pub struct NanosecTimed(pub Duration);
+
+#[derive(Debug)]
+pub enum NanosecTimedParseError {
+    InvalidValue(String),
+}
+
+impl FromStr for NanosecTimed {
+    type Err = NanosecTimedParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(NanosecTimed({
+            let s = s.trim();
+            let pow = if s.ends_with("ns") {
+                0
+            } else if s.ends_with("us") {
+                3
+            } else if s.ends_with("ms") {
+                6
+            } else if s.ends_with('s') {
+                9
+            } else {
+                0
+            };
+
+            let s = s.trim_end_matches(|u| u == 's' || u == 'n' || u == 'u' || u == 'm');
+            let v = s
+                .parse::<u64>()
+                .map_err(|_| NanosecTimedParseError::InvalidValue(s.to_owned()))?;
+            Duration::from_nanos(v * 10u64.pow(pow))
+        }))
     }
 }
 
