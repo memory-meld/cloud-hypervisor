@@ -93,6 +93,7 @@ use vm_migration::{
     protocol::MemoryRangeTable, snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot,
     SnapshotData, Snapshottable, Transportable,
 };
+use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
@@ -190,6 +191,12 @@ pub enum Error {
 
     #[error("Eventfd write error: {0}")]
     EventfdError(#[source] std::io::Error),
+
+    #[error("Timerfd reset error: {0}")]
+    TimerfdError(#[source] errno::Error),
+
+    #[error("Dirty log error: {0}")]
+    DirtyLogError(#[source] MigratableError),
 
     #[error("Cannot snapshot VM: {0}")]
     Snapshot(#[source] MigratableError),
