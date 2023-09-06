@@ -9,7 +9,7 @@ extern crate event_monitor;
 use argh::FromArgs;
 use libc::EFD_NONBLOCK;
 use log::{warn, LevelFilter};
-use option_parser::OptionParser;
+use option_parser::{NanosecTimed, OptionParser};
 use seccompiler::SeccompAction;
 use signal_hook::consts::SIGSYS;
 use std::env;
@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 #[cfg(feature = "dbus_api")]
 use vmm::api::dbus::{dbus_api_graceful_shutdown, DBusApiOptions};
+use vmm::api::VmmEnableHmemData;
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
@@ -81,6 +82,8 @@ enum Error {
     LogFileCreation(std::io::Error),
     #[error("Error setting up logger: {0}")]
     LoggerSetup(log::SetLoggerError),
+    #[error("Error parsing --hmem: {0}")]
+    ParsingHmem(option_parser::OptionParserError),
 }
 
 struct Logger {
@@ -295,6 +298,10 @@ pub struct TopLevel {
     #[argh(switch, short = 'V', long = "version")]
     /// print version information
     version: bool,
+
+    #[argh(option, long = "hmem")]
+    /// delay=<duration>, interval=<duration>
+    hmem: Option<String>,
 }
 
 impl TopLevel {
@@ -429,6 +436,28 @@ fn start_vmm(toplevel: TopLevel) -> Result<Option<String>, Error> {
     }))
     .map(|()| log::set_max_level(log_level))
     .map_err(Error::LoggerSetup)?;
+
+    let vmm_enable_hmem_data = if let Some(ref hmem) = toplevel.hmem {
+        let mut parser = OptionParser::new();
+        parser.add("delay").add("interval");
+        parser.parse(hmem).unwrap_or_default();
+
+        let delay = parser
+            .convert::<NanosecTimed>("delay")
+            .map_err(Error::ParsingHmem)?
+            .map(|v| v.0)
+            .unwrap_or_default();
+        let interval = parser
+            .convert::<NanosecTimed>("interval")
+            .map_err(Error::ParsingHmem)?
+            .map(|v| v.0);
+
+        warn!("will enable heterogeneous memory support");
+        warn!("initial collection delay {delay:?} subsequent interval {interval:?}");
+        Some(VmmEnableHmemData { delay, interval })
+    } else {
+        None
+    };
 
     let (api_socket_path, api_socket_fd) = if let Some(ref socket_config) = toplevel.api_socket {
         let mut parser = OptionParser::new();
