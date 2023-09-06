@@ -27,6 +27,7 @@ use crate::vm::{Error as VmError, Vm, VmState};
 use anyhow::anyhow;
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
+use api::VmmEnableHmemData;
 use libc::{tcsetattr, termios, EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
@@ -1324,6 +1325,20 @@ impl Vmm {
         }
     }
 
+    fn vmm_enable_hmem(
+        &mut self,
+        enable_hmem_data: VmmEnableHmemData,
+    ) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            self.hmem_evt
+                .reset(enable_hmem_data.delay, enable_hmem_data.interval)
+                .map_err(VmError::TimerfdError)?;
+            vm.start_dirty_log().map_err(VmError::DirtyLogError)
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+    }
+
     fn vm_receive_config<T>(
         &mut self,
         req: &Request,
@@ -2190,6 +2205,13 @@ impl Vmm {
                                         .map_err(ApiError::VmPowerButton)
                                         .map(|_| ApiResponsePayload::Empty);
 
+                                    sender.send(response).map_err(Error::ApiResponseSend)?;
+                                }
+                                ApiRequest::VmmEnableHmem(enable_hmem_data, sender) => {
+                                    let response = self
+                                        .vmm_enable_hmem(enable_hmem_data.as_ref().clone())
+                                        .map_err(ApiError::VmEnableHmem)
+                                        .map(|_| ApiResponsePayload::Empty);
                                     sender.send(response).map_err(Error::ApiResponseSend)?;
                                 }
                             }
