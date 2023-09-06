@@ -199,6 +199,9 @@ pub enum Error {
 
     #[error("Failed to join on threads: {0:?}")]
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
+
+    #[error("Cannot collect hmem access samples: {0}")]
+    HmemSampleCollection(#[source] MigratableError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -2218,6 +2221,12 @@ impl Vmm {
                         // Consume the event.
                         let count = self.hmem_evt.wait().map_err(Error::TimerFdWait)?;
                         info!("VM hmem pending scan: {count}");
+                        if let Some(ref mut vm) = self.vm {
+                            vm.hmem_collect_access_samples()
+                                .map_err(Error::HmemSampleCollection)?;
+                        } else {
+                            warn!("Hmem monitoring timer goes off when hmem disabled");
+                        }
                     }
                 }
             }
