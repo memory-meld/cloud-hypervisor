@@ -9,7 +9,7 @@ extern crate event_monitor;
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use libc::EFD_NONBLOCK;
 use log::{warn, LevelFilter};
-use option_parser::OptionParser;
+use option_parser::{NanosecTimed, OptionParser};
 use seccompiler::SeccompAction;
 use signal_hook::consts::SIGSYS;
 use std::env;
@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 #[cfg(feature = "dbus_api")]
 use vmm::api::dbus::{dbus_api_graceful_shutdown, DBusApiOptions};
+use vmm::api::VmmEnableHmemData;
 use vmm::config;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
@@ -81,6 +82,8 @@ enum Error {
     LogFileCreation(std::io::Error),
     #[error("Error setting up logger: {0}")]
     LoggerSetup(log::SetLoggerError),
+    #[error("Error parsing --hmem: {0}")]
+    ParsingHmem(option_parser::OptionParserError),
 }
 
 struct Logger {
