@@ -88,7 +88,7 @@ use vm_device::Bus;
 #[cfg(feature = "tdx")]
 use vm_memory::{Address, ByteValued, GuestMemory, GuestMemoryRegion};
 use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
-use vm_migration::protocol::{Request, Response, Status};
+use vm_migration::protocol::{MemoryRange, Request, Response, Status};
 use vm_migration::{
     protocol::MemoryRangeTable, snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot,
     SnapshotData, Snapshottable, Transportable,
@@ -2205,6 +2205,29 @@ impl Vm {
 
     pub fn memory_manager_data(&self) -> MemoryManagerSnapshotData {
         self.memory_manager.lock().unwrap().snapshot_data()
+    }
+
+    pub fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+        self.memory_manager.lock().unwrap().start_dirty_log()
+    }
+
+    pub fn hmem_collect_access_samples(&mut self) -> std::result::Result<(), MigratableError> {
+        let begin = unsafe { core::arch::x86_64::_rdtsc() };
+        let table = self.memory_manager.lock().unwrap().dirty_log()?;
+        let huge_page_size = 2 << 20;
+        let gpas: Vec<_> = table
+            .regions()
+            .iter()
+            .flat_map(|&MemoryRange { gpa, length }| {
+                let aligned = (gpa / huge_page_size) * huge_page_size;
+                (aligned..(aligned + length)).step_by(huge_page_size as _)
+            })
+            .collect();
+        let count = gpas.len();
+        let cost = unsafe { core::arch::x86_64::_rdtsc() } - begin;
+        warn!("sample collected {count} cost {cost}");
+
+        Ok(())
     }
 
     #[cfg(feature = "guest_debug")]
