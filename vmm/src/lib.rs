@@ -53,9 +53,11 @@ use tracer::trace_scoped;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_migration::{protocol::*, Migratable};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
+use vmm_sys_util::timerfd::TimerFd;
 
 mod acpi;
 pub mod api;
@@ -107,6 +109,14 @@ pub enum Error {
     /// Cannot read from EventFd.
     #[error("Error reading from EventFd: {0}")]
     EventFdRead(#[source] io::Error),
+
+    /// Cannot create TimerFd.
+    #[error("Error creating TimerFd: {0}")]
+    TimerFdCreate(#[source] errno::Error),
+
+    /// Cannot read from TimerFd.
+    #[error("Error waiting TimerFd: {0}")]
+    TimerFdWait(#[source] errno::Error),
 
     /// Cannot create epoll context.
     #[error("Error creating epoll context: {0}")]
@@ -200,6 +210,7 @@ pub enum EpollDispatch {
     Api = 2,
     ActivateVirtioDevices = 3,
     Debug = 4,
+    Hmem = 5,
     Unknown,
 }
 
@@ -212,6 +223,7 @@ impl From<u64> for EpollDispatch {
             2 => Api,
             3 => ActivateVirtioDevices,
             4 => Debug,
+            5 => Hmem,
             _ => Unknown,
         }
     }
@@ -535,6 +547,7 @@ pub struct Vmm {
     seccomp_action: SeccompAction,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     activate_evt: EventFd,
+    hmem_evt: TimerFd,
     signals: Option<Handle>,
     threads: Vec<thread::JoinHandle<()>>,
     original_termios_opt: Arc<Mutex<Option<termios>>>,
@@ -632,6 +645,7 @@ impl Vmm {
         let mut epoll = EpollContext::new().map_err(Error::Epoll)?;
         let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
         let activate_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
+        let hmem_evt = TimerFd::new().map_err(Error::TimerFdCreate)?;
 
         epoll
             .add_event(&exit_evt, EpollDispatch::Exit)
@@ -654,6 +668,10 @@ impl Vmm {
             .add_event(&debug_evt, EpollDispatch::Debug)
             .map_err(Error::Epoll)?;
 
+        epoll
+            .add_event(&hmem_evt, EpollDispatch::Hmem)
+            .map_err(Error::Epoll)?;
+
         Ok(Vmm {
             epoll,
             exit_evt,
@@ -672,6 +690,7 @@ impl Vmm {
             signals: None,
             threads: vec![],
             original_termios_opt: Arc::new(Mutex::new(None)),
+            hmem_evt,
         })
     }
 
@@ -2195,6 +2214,11 @@ impl Vmm {
                     }
                     #[cfg(not(feature = "guest_debug"))]
                     EpollDispatch::Debug => {}
+                    EpollDispatch::Hmem => {
+                        // Consume the event.
+                        let count = self.hmem_evt.wait().map_err(Error::TimerFdWait)?;
+                        info!("VM hmem pending scan: {count}");
+                    }
                 }
             }
         }
