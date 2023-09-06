@@ -48,6 +48,7 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use std::sync::mpsc::{channel, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use vm_migration::MigratableError;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -218,6 +219,14 @@ pub struct VmSendMigrationData {
     pub local: bool,
 }
 
+#[derive(Clone, Deserialize, Serialize, Default, Debug)]
+pub struct VmmEnableHmemData {
+    /// The initial delay before enabling sample collection
+    pub delay: Duration,
+    /// The sample collection interval
+    pub interval: Option<Duration>,
+}
+
 pub enum ApiResponsePayload {
     /// No data is sent on the channel.
     Empty,
@@ -335,6 +344,9 @@ pub enum ApiRequest {
 
     // Trigger power button
     VmPowerButton(Sender<ApiResponse>),
+
+    /// Enable heterogeneous memory management
+    VmmEnableHmem(Arc<VmmEnableHmemData>, Sender<ApiResponse>),
 }
 
 pub fn vm_create(
@@ -431,6 +443,9 @@ pub enum VmAction {
 
     /// Power Button for clean shutdown
     PowerButton,
+
+    /// Enable heterogeneous memory
+    VmmEnableHmemData(Arc<VmmEnableHmemData>),
 }
 
 fn vm_action(
@@ -467,6 +482,7 @@ fn vm_action(
         ReceiveMigration(v) => ApiRequest::VmReceiveMigration(v, response_sender),
         SendMigration(v) => ApiRequest::VmSendMigration(v, response_sender),
         PowerButton => ApiRequest::VmPowerButton(response_sender),
+        VmmEnableHmemData(v) => ApiRequest::VmmEnableHmem(v, response_sender),
     };
 
     // Send the VM request.
@@ -691,4 +707,12 @@ pub fn vm_add_vsock(
     data: Arc<VsockConfig>,
 ) -> ApiResult<Option<Body>> {
     vm_action(api_evt, api_sender, VmAction::AddVsock(data))
+}
+
+pub fn vmm_enable_hmem(
+    api_evt: EventFd,
+    api_sender: Sender<ApiRequest>,
+    data: Arc<VmmEnableHmemData>,
+) -> ApiResult<Option<Body>> {
+    vm_action(api_evt, api_sender, VmAction::VmmEnableHmemData(data))
 }
