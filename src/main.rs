@@ -82,6 +82,8 @@ enum Error {
     LogFileCreation(std::io::Error),
     #[error("Error setting up logger: {0}")]
     LoggerSetup(log::SetLoggerError),
+    #[error("Error enabling heterogeneous memory: {0:?}")]
+    VmmEnableHmem(vmm::api::ApiError),
     #[error("Error parsing --hmem: {0}")]
     ParsingHmem(option_parser::OptionParserError),
 }
@@ -686,7 +688,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
             let sender = api_request_sender.clone();
             vmm::api::vm_create(
                 api_evt.try_clone().unwrap(),
-                api_request_sender,
+                api_request_sender.clone(),
                 Arc::new(Mutex::new(vm_config)),
             )
             .map_err(Error::VmCreate)?;
@@ -694,12 +696,22 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         } else if let Some(restore_params) = cmd_arguments.get_one::<String>("restore") {
             vmm::api::vm_restore(
                 api_evt.try_clone().unwrap(),
-                api_request_sender,
+                api_request_sender.clone(),
                 Arc::new(
                     config::RestoreConfig::parse(restore_params).map_err(Error::ParsingRestore)?,
                 ),
             )
             .map_err(Error::VmRestore)?;
+        }
+
+        if let Some(data) = vmm_enable_hmem_data {
+            vmm::api::vmm_enable_hmem(
+                api_evt.try_clone().unwrap(),
+                api_request_sender.clone(),
+                Arc::new(data),
+            )
+            .map_err(Error::VmmEnableHmem)?;
+            warn!("heterogeneous memory support is enabled");
         }
 
         Ok(())
