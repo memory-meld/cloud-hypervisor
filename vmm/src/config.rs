@@ -1918,7 +1918,7 @@ impl VmConfig {
         if let Some(numa) = &self.numa {
             let mut used_numa_node_memory_zones = HashMap::new();
             for numa_node in numa.iter() {
-                for memory_zone in numa_node.memory_zones.clone().unwrap().iter() {
+                for memory_zone in numa_node.memory_zones.clone().unwrap_or_default().iter() {
                     if !used_numa_node_memory_zones.contains_key(memory_zone) {
                         used_numa_node_memory_zones
                             .insert(memory_zone.to_string(), numa_node.guest_numa_id);
