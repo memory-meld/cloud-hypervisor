@@ -13,9 +13,9 @@ servers:
 paths:
   /vmm.ping:
     get:
-      summary: Ping the VMM to check for API server availability
+      description: Ping the VMM to check for API server availability
       responses:
-        200:
+        "200":
           description: The VMM information
           content:
             application/json:
@@ -24,17 +24,17 @@ paths:
 
   /vmm.shutdown:
     put:
-      summary: Shuts the cloud-hypervisor VMM.
+      description: Shuts the cloud-hypervisor VMM.
       operationId: shutdownVMM
       responses:
-        204:
+        "204":
           description: The VMM successfully shutdown.
 
   /vm.info:
     get:
-      summary: Returns general information about the cloud-hypervisor Virtual Machine (VM) instance.
+      description: Returns general information about the cloud-hypervisor Virtual Machine (VM) instance.
       responses:
-        200:
+        "200":
           description: The VM information
           content:
             application/json:
@@ -43,9 +43,9 @@ paths:
 
   /vm.counters:
     get:
-      summary: Get counters from the VM
+      description: Get counters from the VM
       responses:
-        200:
+        "200":
           description: The VM counters
           content:
             application/json:
@@ -54,7 +54,7 @@ paths:
 
   /vm.create:
     put:
-      summary: Create the cloud-hypervisor Virtual Machine (VM) instance. The instance is not booted, only created.
+      description: Create the cloud-hypervisor Virtual Machine (VM) instance. The instance is not booted, only created.
       operationId: createVM
       requestBody:
         description: The VM configuration
@@ -64,90 +64,90 @@ paths:
               $ref: "#/components/schemas/VmConfig"
         required: true
       responses:
-        204:
+        "204":
           description: The VM instance was successfully created.
 
   /vm.delete:
     put:
-      summary: Delete the cloud-hypervisor Virtual Machine (VM) instance.
+      description: Delete the cloud-hypervisor Virtual Machine (VM) instance.
       operationId: deleteVM
       responses:
-        204:
+        "204":
           description: The VM instance was successfully deleted.
 
   /vm.boot:
     put:
-      summary: Boot the previously created VM instance.
+      description: Boot the previously created VM instance.
       operationId: bootVM
       responses:
-        204:
+        "204":
           description: The VM instance successfully booted.
-        404:
+        "404":
           description: The VM instance could not boot because it is not created yet
 
   /vm.pause:
     put:
-      summary: Pause a previously booted VM instance.
+      description: Pause a previously booted VM instance.
       operationId: pauseVM
       responses:
-        204:
+        "204":
           description: The VM instance successfully paused.
-        404:
+        "404":
           description: The VM instance could not pause because it is not created yet
-        405:
+        "405":
           description: The VM instance could not pause because it is not booted.
 
   /vm.resume:
     put:
-      summary: Resume a previously paused VM instance.
+      description: Resume a previously paused VM instance.
       operationId: resumeVM
       responses:
-        204:
+        "204":
           description: The VM instance successfully paused.
-        404:
+        "404":
           description: The VM instance could not resume because it is not booted yet
-        405:
+        "405":
           description: The VM instance could not resume because it is not paused.
 
   /vm.shutdown:
     put:
-      summary: Shut the VM instance down.
+      description: Shut the VM instance down.
       operationId: shutdownVM
       responses:
-        204:
+        "204":
           description: The VM instance successfully shut down.
-        404:
+        "404":
           description: The VM instance could not shut down because is not created.
-        405:
+        "405":
           description: The VM instance could not shut down because it is not started.
 
   /vm.reboot:
     put:
-      summary: Reboot the VM instance.
+      description: Reboot the VM instance.
       operationId: rebootVM
       responses:
-        204:
+        "204":
           description: The VM instance successfully rebooted.
-        404:
+        "404":
           description: The VM instance could not reboot because it is not created.
-        405:
+        "405":
           description: The VM instance could not reboot because it is not booted.
 
   /vm.power-button:
     put:
-      summary: Trigger a power button in the VM
+      description: Trigger a power button in the VM
       operationId: power-buttonVM
       responses:
-        204:
+        "204":
           description: Power button successfully triggered in the VM
-        404:
+        "404":
           description: The button could not be triggered because it is not created yet
-        405:
+        "405":
           description: The button could not be triggered because it is not booted.
 
   /vm.resize:
     put:
-      summary: Resize the VM
+      description: Resize the VM
       requestBody:
         description: The target size for the VM
         content:
@@ -156,14 +156,14 @@ paths:
               $ref: "#/components/schemas/VmResize"
         required: true
       responses:
-        204:
+        "204":
           description: The VM instance was successfully resized.
-        404:
+        "404":
           description: The VM instance could not be resized because it is not created.
 
   /vm.resize-zone:
     put:
-      summary: Resize a memory zone
+      description: Resize a memory zone
       requestBody:
         description: The target size for the memory zone
         content:
@@ -172,14 +172,14 @@ paths:
               $ref: "#/components/schemas/VmResizeZone"
         required: true
       responses:
-        204:
+        "204":
           description: The memory zone was successfully resized.
-        500:
+        "500":
           description: The memory zone could not be resized.
 
   /vm.add-device:
     put:
-      summary: Add a new device to the VM
+      description: Add a new device to the VM
       requestBody:
         description: The path of the new device
         content:
@@ -188,20 +188,20 @@ paths:
               $ref: "#/components/schemas/DeviceConfig"
         required: true
       responses:
-        200:
+        "200":
           description: The new device was successfully added to the VM instance.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/PciDeviceInfo"
-        204:
+        "204":
           description: The new device was successfully (cold) added to the VM instance.
-        404:
+        "404":
           description: The new device could not be added to the VM instance.
 
   /vm.remove-device:
     put:
-      summary: Remove a device from the VM
+      description: Remove a device from the VM
       requestBody:
         description: The identifier of the device
         content:
@@ -210,14 +210,14 @@ paths:
               $ref: "#/components/schemas/VmRemoveDevice"
         required: true
       responses:
-        204:
+        "204":
           description: The device was successfully removed from the VM instance.
-        404:
+        "404":
           description: The device could not be removed from the VM instance.
 
   /vm.add-disk:
     put:
-      summary: Add a new disk to the VM
+      description: Add a new disk to the VM
       requestBody:
         description: The details of the new disk
         content:
@@ -226,20 +226,20 @@ paths:
               $ref: "#/components/schemas/DiskConfig"
         required: true
       responses:
-        200:
+        "200":
           description: The new disk was successfully added to the VM instance.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/PciDeviceInfo"
-        204:
+        "204":
           description: The new disk was successfully (cold) added to the VM instance.
-        500:
+        "500":
           description: The new disk could not be added to the VM instance.
 
   /vm.add-fs:
     put:
-      summary: Add a new virtio-fs device to the VM
+      description: Add a new virtio-fs device to the VM
       requestBody:
         description: The details of the new virtio-fs
         content:
@@ -248,20 +248,20 @@ paths:
               $ref: "#/components/schemas/FsConfig"
         required: true
       responses:
-        200:
+        "200":
           description: The new device was successfully added to the VM instance.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/PciDeviceInfo"
-        204:
+        "204":
           description: The new device was successfully (cold) added to the VM instance.
-        500:
+        "500":
           description: The new device could not be added to the VM instance.
 
   /vm.add-pmem:
     put:
-      summary: Add a new pmem device to the VM
+      description: Add a new pmem device to the VM
       requestBody:
         description: The details of the new pmem device
         content:
@@ -270,20 +270,20 @@ paths:
               $ref: "#/components/schemas/PmemConfig"
         required: true
       responses:
-        200:
+        "200":
           description: The new device was successfully added to the VM instance.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/PciDeviceInfo"
-        204:
+        "204":
           description: The new device was successfully (cold) added to the VM instance.
-        500:
+        "500":
           description: The new device could not be added to the VM instance.
 
   /vm.add-net:
     put:
-      summary: Add a new network device to the VM
+      description: Add a new network device to the VM
       requestBody:
         description: The details of the new network device
         content:
@@ -292,20 +292,20 @@ paths:
               $ref: "#/components/schemas/NetConfig"
         required: true
       responses:
-        200:
+        "200":
           description: The new device was successfully added to the VM instance.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/PciDeviceInfo"
-        204:
+        "204":
           description: The new device was successfully (cold) added to the VM instance.
-        500:
+        "500":
           description: The new device could not be added to the VM instance.
 
   /vm.add-vsock:
     put:
-      summary: Add a new vsock device to the VM
+      description: Add a new vsock device to the VM
       requestBody:
         description: The details of the new vsock device
         content:
@@ -314,20 +314,20 @@ paths:
               $ref: "#/components/schemas/VsockConfig"
         required: true
       responses:
-        200:
+        "200":
           description: The new device was successfully added to the VM instance.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/PciDeviceInfo"
-        204:
+        "204":
           description: The new device was successfully (cold) added to the VM instance.
-        500:
+        "500":
           description: The new device could not be added to the VM instance.
 
   /vm.add-vdpa:
     put:
-      summary: Add a new vDPA device to the VM
+      description: Add a new vDPA device to the VM
       requestBody:
         description: The details of the new vDPA device
         content:
@@ -336,20 +336,20 @@ paths:
               $ref: "#/components/schemas/VdpaConfig"
         required: true
       responses:
-        200:
+        "200":
           description: The new vDPA device was successfully added to the VM instance.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/PciDeviceInfo"
-        204:
+        "204":
           description: The new vDPA device was successfully (cold) added to the VM instance.
-        500:
+        "500":
           description: The new vDPA device could not be added to the VM instance.
 
   /vm.snapshot:
     put:
-      summary: Returns a VM snapshot.
+      description: Returns a VM snapshot.
       requestBody:
         description: The snapshot configuration
         content:
@@ -358,16 +358,16 @@ paths:
               $ref: "#/components/schemas/VmSnapshotConfig"
         required: true
       responses:
-        204:
+        "204":
           description: The VM instance was successfully snapshotted.
-        404:
+        "404":
           description: The VM instance could not be snapshotted because it is not created.
-        405:
+        "405":
           description: The VM instance could not be snapshotted because it is not booted.
 
   /vm.coredump:
     put:
-      summary: Takes a VM coredump.
+      description: Takes a VM coredump.
       requestBody:
         description: The coredump configuration
         content:
@@ -376,16 +376,16 @@ paths:
               $ref: "#/components/schemas/VmCoredumpData"
         required: true
       responses:
-        204:
+        "204":
           description: The VM instance was successfully coredumped.
-        404:
+        "404":
           description: The VM instance could not be coredumped because it is not created.
-        405:
+        "405":
           description: The VM instance could not be coredumped because it is not booted.
 
   /vm.restore:
     put:
-      summary: Restore a VM from a snapshot.
+      description: Restore a VM from a snapshot.
       requestBody:
         description: The restore configuration
         content:
@@ -394,14 +394,14 @@ paths:
               $ref: "#/components/schemas/RestoreConfig"
         required: true
       responses:
-        204:
+        "204":
           description: The VM instance was successfully restored.
-        404:
+        "404":
           description: The VM instance could not be restored because it is already created.
 
   /vm.receive-migration:
     put:
-      summary: Receive a VM migration from URL
+      description: Receive a VM migration from URL
       requestBody:
         description: The URL for the reception of migration state
         content:
@@ -410,14 +410,14 @@ paths:
               $ref: "#/components/schemas/ReceiveMigrationData"
         required: true
       responses:
-        204:
+        "204":
           description: The VM migration was successfully received.
-        500:
+        "500":
           description: The VM migration could not be received.
 
   /vm.send-migration:
     put:
-      summary: Send a VM migration to URL
+      description: Send a VM migration to URL
       requestBody:
         description: The URL for sending the migration state
         content:
@@ -426,9 +426,9 @@ paths:
               $ref: "#/components/schemas/SendMigrationData"
         required: true
       responses:
-        204:
+        "204":
           description: The VM migration was successfully sent.
-        500:
+        "500":
           description: The VM migration could not be sent.
 
 components:
