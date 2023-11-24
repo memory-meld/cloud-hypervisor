@@ -72,6 +72,18 @@ const VIRTIO_BALLOON_F_REPORTING: u64 = 5;
 // Enable an additional pair of inflate and deflate virtqueues to handle ballooning of heterogeneous memory
 const VIRTIO_BALLOON_F_HETERO_MEM: u64 = 6;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum BalloonVq {
+    Inflate,
+    Deflate,
+    Stats,
+    // Not supported currently
+    _FreePage,
+    Reporting,
+    HeteroInflate,
+    HeteroDeflate,
+}
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Guest gave us bad memory addresses.: {0}")]
@@ -173,6 +185,8 @@ unsafe impl ByteValued for VirtioBalloonConfig {}
 struct BalloonEpollHandler {
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     queues: Vec<Queue>,
+    // Fix the mismatch between index into queues and BalloonVq value when some queues are not present due to unsupported features
+    queue_indices: HashMap<BalloonVq, usize>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     inflate_queue_evt: EventFd,
     deflate_queue_evt: EventFd,
@@ -277,7 +291,8 @@ impl BalloonEpollHandler {
         Ok(())
     }
 
-    fn process_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
+    fn process_queue(&mut self, queue: BalloonVq) -> result::Result<(), Error> {
+        let queue_index = self.queue_indices[&queue];
         let mut used_descs = false;
         while let Some(mut desc_chain) =
             self.queues[queue_index].pop_descriptor_chain(self.mem.memory())
@@ -305,24 +320,22 @@ impl BalloonEpollHandler {
                     .map_err(Error::GuestMemory)?;
                 offset += data_chunk_size as u64;
 
-                if queue_index == 0
-                    || (self.queues.len() >= 4 && queue_index == self.queues.len() - 2)
-                {
-                    Self::release_memory_range_4k(&mut self.pbp, desc_chain.memory(), pfn)?;
-                } else if queue_index == 1
-                    || (self.queues.len() >= 4 && queue_index == self.queues.len() - 1)
-                {
-                    let page_size = get_page_size() as usize;
-                    let rbase = align_page_size_down((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT);
+                match queue {
+                    BalloonVq::Inflate | BalloonVq::HeteroInflate => {
+                        Self::release_memory_range_4k(&mut self.pbp, desc_chain.memory(), pfn)?;
+                    }
+                    BalloonVq::Deflate | BalloonVq::HeteroDeflate => {
+                        let page_size = get_page_size() as usize;
+                        let rbase = align_page_size_down((pfn as u64) << VIRTIO_BALLOON_PFN_SHIFT);
 
-                    Self::advise_memory_range(
-                        desc_chain.memory(),
-                        vm_memory::GuestAddress(rbase),
-                        page_size,
-                        libc::MADV_WILLNEED,
-                    )?;
-                } else {
-                    return Err(Error::InvalidQueueIndex(queue_index));
+                        Self::advise_memory_range(
+                            desc_chain.memory(),
+                            vm_memory::GuestAddress(rbase),
+                            page_size,
+                            libc::MADV_WILLNEED,
+                        )?;
+                    }
+                    _ => Err(Error::InvalidQueueIndex(queue_index))?,
                 }
             }
 
@@ -339,7 +352,8 @@ impl BalloonEpollHandler {
         }
     }
 
-    fn process_stats_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
+    fn process_stats_queue(&mut self, queue: BalloonVq) -> result::Result<(), Error> {
+        let queue_index = self.queue_indices[&queue];
         // let mut used_descs = false;
         while let Some(mut desc_chain) =
             self.queues[queue_index].pop_descriptor_chain(self.mem.memory())
@@ -430,7 +444,8 @@ impl BalloonEpollHandler {
         Ok(())
     }
 
-    fn process_reporting_queue(&mut self, queue_index: usize) -> result::Result<(), Error> {
+    fn process_reporting_queue(&mut self, queue: BalloonVq) -> result::Result<(), Error> {
+        let queue_index = self.queue_indices[&queue];
         let mut used_descs = false;
         while let Some(mut desc_chain) =
             self.queues[queue_index].pop_descriptor_chain(self.mem.memory())
@@ -501,7 +516,7 @@ impl EpollHelperHandler for BalloonEpollHandler {
                         e
                     ))
                 })?;
-                self.process_queue(0).map_err(|e| {
+                self.process_queue(BalloonVq::Inflate).map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
                         "Failed to signal used inflate queue: {:?}",
                         e
@@ -515,7 +530,7 @@ impl EpollHelperHandler for BalloonEpollHandler {
                         e
                     ))
                 })?;
-                self.process_queue(1).map_err(|e| {
+                self.process_queue(BalloonVq::Deflate).map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
                         "Failed to signal used deflate queue: {:?}",
                         e
@@ -530,7 +545,7 @@ impl EpollHelperHandler for BalloonEpollHandler {
                             e
                         ))
                     })?;
-                    self.process_stats_queue(2).map_err(|e| {
+                    self.process_stats_queue(BalloonVq::Stats).map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
                             "Failed to signal used statistics queue: {:?}",
                             e
@@ -550,15 +565,13 @@ impl EpollHelperHandler for BalloonEpollHandler {
                             e
                         ))
                     })?;
-                    self.process_reporting_queue(
-                        2 + self.stats_queue_evt.as_ref().map(|_| 1).unwrap_or(0),
-                    )
-                    .map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used reporting queue: {:?}",
-                            e
-                        ))
-                    })?;
+                    self.process_reporting_queue(BalloonVq::Reporting)
+                        .map_err(|e| {
+                            EpollHelperError::HandleEvent(anyhow!(
+                                "Failed to signal used reporting queue: {:?}",
+                                e
+                            ))
+                        })?;
                 } else {
                     return Err(EpollHelperError::HandleEvent(anyhow!(
                         "Invalid reporting queue event as no eventfd registered"
@@ -573,7 +586,7 @@ impl EpollHelperHandler for BalloonEpollHandler {
                             e
                         ))
                     })?;
-                    self.process_queue(self.queues.len() - 2).map_err(|e| {
+                    self.process_queue(BalloonVq::HeteroInflate).map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
                             "Failed to signal used heterogeneous inflate queue: {:?}",
                             e
@@ -593,7 +606,7 @@ impl EpollHelperHandler for BalloonEpollHandler {
                             e
                         ))
                     })?;
-                    self.process_queue(self.queues.len() - 1).map_err(|e| {
+                    self.process_queue(BalloonVq::HeteroDeflate).map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
                             "Failed to signal used heterogeneous deflate queue: {:?}",
                             e
@@ -821,15 +834,19 @@ impl VirtioDevice for Balloon {
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         let mut virtqueues = Vec::new();
+        let mut queue_indices = HashMap::new();
         let (_, queue, queue_evt) = queues.remove(0);
+        queue_indices.insert(BalloonVq::Inflate, virtqueues.len());
         virtqueues.push(queue);
         let inflate_queue_evt = queue_evt;
         let (_, queue, queue_evt) = queues.remove(0);
+        queue_indices.insert(BalloonVq::Deflate, virtqueues.len());
         virtqueues.push(queue);
         let deflate_queue_evt = queue_evt;
         let stats_queue_evt =
             if self.common.feature_acked(VIRTIO_BALLOON_F_STATS_VQ) && !queues.is_empty() {
                 let (_, queue, queue_evt) = queues.remove(0);
+                queue_indices.insert(BalloonVq::Stats, virtqueues.len());
                 virtqueues.push(queue);
                 Some(queue_evt)
             } else {
@@ -838,6 +855,7 @@ impl VirtioDevice for Balloon {
         let reporting_queue_evt =
             if self.common.feature_acked(VIRTIO_BALLOON_F_REPORTING) && !queues.is_empty() {
                 let (_, queue, queue_evt) = queues.remove(0);
+                queue_indices.insert(BalloonVq::Reporting, virtqueues.len());
                 virtqueues.push(queue);
                 Some(queue_evt)
             } else {
@@ -846,6 +864,7 @@ impl VirtioDevice for Balloon {
         let hetero_inflate_queue_evt =
             if self.common.feature_acked(VIRTIO_BALLOON_F_HETERO_MEM) && !queues.is_empty() {
                 let (_, queue, queue_evt) = queues.remove(0);
+                queue_indices.insert(BalloonVq::HeteroInflate, virtqueues.len());
                 virtqueues.push(queue);
                 Some(queue_evt)
             } else {
@@ -854,6 +873,7 @@ impl VirtioDevice for Balloon {
         let hetero_deflate_queue_evt =
             if self.common.feature_acked(VIRTIO_BALLOON_F_HETERO_MEM) && !queues.is_empty() {
                 let (_, queue, queue_evt) = queues.remove(0);
+                queue_indices.insert(BalloonVq::HeteroDeflate, virtqueues.len());
                 virtqueues.push(queue);
                 Some(queue_evt)
             } else {
@@ -865,6 +885,7 @@ impl VirtioDevice for Balloon {
         let mut handler = BalloonEpollHandler {
             mem,
             queues: virtqueues,
+            queue_indices,
             interrupt_cb,
             inflate_queue_evt,
             deflate_queue_evt,
