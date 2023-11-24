@@ -449,6 +449,16 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 .group("vmm-config"),
         );
 
+    let app = app.arg(
+        Arg::new("hmem")
+            .long("hmem")
+            .help(
+                "PML-based heterogeneous memory management \
+                \"delay=<duration>,interval=<duration>\"",
+            )
+            .num_args(1),
+    );
+
     app.arg(
         Arg::new("version")
             .short('V')
@@ -481,6 +491,28 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     }))
     .map(|()| log::set_max_level(log_level))
     .map_err(Error::LoggerSetup)?;
+
+    let vmm_enable_hmem_data = if let Some(hmem) = cmd_arguments.get_one::<String>("hmem") {
+        let mut parser = OptionParser::new();
+        parser.add("delay").add("interval");
+        parser.parse(hmem).unwrap_or_default();
+
+        let delay = parser
+            .convert::<NanosecTimed>("delay")
+            .map_err(Error::ParsingHmem)?
+            .map(|v| v.0)
+            .unwrap_or_default();
+        let interval = parser
+            .convert::<NanosecTimed>("interval")
+            .map_err(Error::ParsingHmem)?
+            .map(|v| v.0);
+
+        warn!("will enable heterogeneous memory support");
+        warn!("initial collection delay {delay:?} subsequent interval {interval:?}");
+        Some(VmmEnableHmemData { delay, interval })
+    } else {
+        None
+    };
 
     let (api_socket_path, api_socket_fd) =
         if let Some(socket_config) = cmd_arguments.get_one::<String>("api-socket") {
