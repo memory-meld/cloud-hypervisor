@@ -404,6 +404,14 @@ impl BalloonEpollHandler {
                         .counters
                         .hugetlb_failures
                         .store(stat.val, Ordering::Release),
+                    10 => self
+                        .counters
+                        .dram_accesses
+                        .store(stat.val, Ordering::Release),
+                    11 => self
+                        .counters
+                        .pmem_accesses
+                        .store(stat.val, Ordering::Release),
                     _ => return Err(Error::UnexpectedStatTag(stat.tag)),
                 };
             }
@@ -936,6 +944,14 @@ impl VirtioDevice for Balloon {
                 "hugetlb_failures",
                 Wrapping(self.counters.hugetlb_failures.load(Ordering::Acquire)),
             ),
+            (
+                "dram_accesses",
+                Wrapping(self.counters.dram_accesses.load(Ordering::Acquire)),
+            ),
+            (
+                "pmem_accesses",
+                Wrapping(self.counters.pmem_accesses.load(Ordering::Acquire)),
+            ),
         ]))
     }
 }
@@ -974,4 +990,6 @@ pub struct BalloonCounters {
     disk_caches: AtomicU64,
     hugetlb_allocations: AtomicU64,
     hugetlb_failures: AtomicU64,
+    dram_accesses: AtomicU64,
+    pmem_accesses: AtomicU64,
 }
