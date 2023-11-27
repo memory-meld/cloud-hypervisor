@@ -28,6 +28,7 @@ use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{atomic::AtomicBool, Arc, Barrier};
+use std::time::Duration;
 use thiserror::Error;
 use versionize::{VersionMap, Versionize, VersionizeResult};
 use versionize_derive::Versionize;
@@ -40,9 +41,10 @@ use vm_memory::{
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, VersionMapped,
 };
-use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::{eventfd::EventFd, timerfd::TimerFd};
 
 const QUEUE_SIZE: u16 = 128;
+const STATS_QUEUE_SIZE: u16 = 32;
 const REPORTING_QUEUE_SIZE: u16 = 32;
 const MIN_NUM_QUEUES: usize = 2;
 
@@ -52,12 +54,14 @@ const INFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 const DEFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 // Memory statistics virtio queue event.
 const STATS_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
+// The time interval during two memory stat requests expires.
+const STATS_TIMER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 // Reporting virtio queue event.
-const REPORTING_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
+const REPORTING_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
 // Heterogeneous inflate virtio queue event.
-const HETERO_INFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 5;
+const HETERO_INFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 6;
 // Heterogeneous deflate virtio queue event.
-const HETERO_DEFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 6;
+const HETERO_DEFLATE_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 7;
 
 // Size of a PFN in the balloon interface.
 const VIRTIO_BALLOON_PFN_SHIFT: u64 = 12;
@@ -110,6 +114,8 @@ pub enum Error {
     QueueIterator(virtio_queue::Error),
     #[error("Guest sent an unexpected balloon statistic tag: {0}")]
     UnexpectedStatTag(u16),
+    #[error("Failed to support memory statistics")]
+    MemoryStatistic,
 }
 
 // Got from include/uapi/linux/virtio_balloon.h
@@ -147,6 +153,9 @@ struct BalloonEpollHandler {
     inflate_queue_evt: EventFd,
     deflate_queue_evt: EventFd,
     stats_queue_evt: Option<EventFd>,
+    stats_timer_evt: Option<TimerFd>,
+    stats_polling_interval: Option<Duration>,
+    stats_queue_index: Option<usize>,
     reporting_queue_evt: Option<EventFd>,
     hetero_inflate_queue_evt: Option<EventFd>,
     hetero_deflate_queue_evt: Option<EventFd>,
@@ -273,9 +282,20 @@ impl BalloonEpollHandler {
         }
     }
 
+    fn process_stats_timer(&mut self) -> result::Result<(), Error> {
+        // This must be set because the driver will send us a buffer after probing
+        // `process_stats_queue()` will set the queue_index upon receiving this buffer
+        let queue_index = self.stats_queue_index.ok_or(Error::MemoryStatistic)?;
+
+        self.signal(VirtioInterruptType::Queue(queue_index as u16))
+    }
+
     fn process_stats_queue(&mut self, queue: BalloonVq) -> result::Result<(), Error> {
         let queue_index = self.queue_indices[&queue];
-        // let mut used_descs = false;
+        if self.stats_queue_index.is_none() {
+            self.stats_queue_index.replace(queue_index);
+        }
+        let mut used_descs = false;
         while let Some(mut desc_chain) =
             self.queues[queue_index].pop_descriptor_chain(self.mem.memory())
         {
@@ -353,16 +373,22 @@ impl BalloonEpollHandler {
             self.queues[queue_index]
                 .add_used(desc_chain.memory(), desc_chain.head_index(), desc.len())
                 .map_err(Error::QueueAddUsed)?;
-            // used_descs = true;
+            used_descs = true;
         }
 
-        // TODO: signal the Guest when we need to refresh statistics
-        // if used_descs {
-        //     self.signal(VirtioInterruptType::Queue(queue_index as u16))
-        // } else {
-        //     Ok(())
-        // }
-        Ok(())
+        // signal the Guest after the timer goes off to refresh statistics
+        if used_descs {
+            self.stats_timer_evt
+                .as_mut()
+                .ok_or(Error::MemoryStatistic)?
+                .reset(
+                    self.stats_polling_interval.ok_or(Error::MemoryStatistic)?,
+                    None,
+                )
+                .map_err(|_| Error::MemoryStatistic)
+        } else {
+            Ok(())
+        }
     }
 
     fn process_reporting_queue(&mut self, queue: BalloonVq) -> result::Result<(), Error> {
@@ -398,6 +424,9 @@ impl BalloonEpollHandler {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.inflate_queue_evt.as_raw_fd(), INFLATE_QUEUE_EVENT)?;
         helper.add_event(self.deflate_queue_evt.as_raw_fd(), DEFLATE_QUEUE_EVENT)?;
+        if let Some(stats_timer_evt) = self.stats_timer_evt.as_ref() {
+            helper.add_event(stats_timer_evt.as_raw_fd(), STATS_TIMER_EVENT)?;
+        }
         if let Some(stats_queue_evt) = self.stats_queue_evt.as_ref() {
             helper.add_event(stats_queue_evt.as_raw_fd(), STATS_QUEUE_EVENT)?;
         }
@@ -416,6 +445,7 @@ impl BalloonEpollHandler {
                 HETERO_DEFLATE_QUEUE_EVENT,
             )?;
         }
+
         helper.run(paused, paused_sync, self)?;
 
         Ok(())
@@ -458,6 +488,20 @@ impl EpollHelperHandler for BalloonEpollHandler {
                     ))
                 })?;
             }
+            STATS_TIMER_EVENT => {
+                if let Some(_stats_timer_evt) = self.stats_timer_evt.as_ref() {
+                    self.process_stats_timer().map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to signal used statistics queue: {:?}",
+                            e
+                        ))
+                    })?;
+                } else {
+                    return Err(EpollHelperError::HandleEvent(anyhow!(
+                        "Invalid statistics timer event as no timerfd registered"
+                    )));
+                }
+            }
             STATS_QUEUE_EVENT => {
                 if let Some(stats_queue_evt) = self.stats_queue_evt.as_ref() {
                     stats_queue_evt.read().map_err(|e| {
@@ -468,7 +512,7 @@ impl EpollHelperHandler for BalloonEpollHandler {
                     })?;
                     self.process_stats_queue(BalloonVq::Stats).map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used statistics queue: {:?}",
+                            "Failed to consume available memory statistics: {:?}",
                             e
                         ))
                     })?;
@@ -568,6 +612,7 @@ pub struct Balloon {
     exit_evt: EventFd,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     counters: Arc<BalloonCounters>,
+    stats_polling_interval: Option<Duration>,
 }
 
 impl Balloon {
@@ -576,7 +621,7 @@ impl Balloon {
     pub fn new(
         id: String,
         size: [u64; 2],
-        statistics: bool,
+        stats_polling_interval: Option<Duration>,
         deflate_on_oom: bool,
         free_page_reporting: bool,
         heterogeneous_memory: bool,
@@ -596,7 +641,7 @@ impl Balloon {
             )
         } else {
             let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
-            if statistics {
+            if stats_polling_interval.is_some() {
                 avail_features |= 1u64 << VIRTIO_BALLOON_F_STATS_VQ;
             }
             if deflate_on_oom {
@@ -618,8 +663,8 @@ impl Balloon {
             (avail_features, 0, config, false)
         };
 
-        if statistics {
-            queue_sizes.push(REPORTING_QUEUE_SIZE);
+        if stats_polling_interval.is_some() {
+            queue_sizes.push(STATS_QUEUE_SIZE);
         }
         if free_page_reporting {
             queue_sizes.push(REPORTING_QUEUE_SIZE);
@@ -645,6 +690,7 @@ impl Balloon {
             exit_evt,
             interrupt_cb: None,
             counters: Arc::new(BalloonCounters::default()),
+            stats_polling_interval,
         })
     }
 
@@ -764,14 +810,15 @@ impl VirtioDevice for Balloon {
         queue_indices.insert(BalloonVq::Deflate, virtqueues.len());
         virtqueues.push(queue);
         let deflate_queue_evt = queue_evt;
-        let stats_queue_evt =
+        let (stats_queue_evt, stats_timer_evt) =
             if self.common.feature_acked(VIRTIO_BALLOON_F_STATS_VQ) && !queues.is_empty() {
                 let (_, queue, queue_evt) = queues.remove(0);
                 queue_indices.insert(BalloonVq::Stats, virtqueues.len());
                 virtqueues.push(queue);
-                Some(queue_evt)
+                let timer_evt = TimerFd::new().map_err(|_| ActivateError::BadActivate)?;
+                (Some(queue_evt), Some(timer_evt))
             } else {
-                None
+                (None, None)
             };
         let reporting_queue_evt =
             if self.common.feature_acked(VIRTIO_BALLOON_F_REPORTING) && !queues.is_empty() {
@@ -816,6 +863,9 @@ impl VirtioDevice for Balloon {
             inflate_queue_evt,
             deflate_queue_evt,
             stats_queue_evt,
+            stats_timer_evt,
+            stats_polling_interval: self.stats_polling_interval,
+            stats_queue_index: None,
             reporting_queue_evt,
             hetero_inflate_queue_evt,
             hetero_deflate_queue_evt,

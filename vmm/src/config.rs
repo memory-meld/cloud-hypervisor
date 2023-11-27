@@ -6,8 +6,8 @@
 pub use crate::vm_config::*;
 use clap::ArgMatches;
 use option_parser::{
-    ByteSized, ByteSizedList, IntegerList, OptionParser, OptionParserError, StringList, Toggle,
-    Tuple,
+    ByteSized, ByteSizedList, IntegerList, NanosecTimed, OptionParser, OptionParserError,
+    StringList, Toggle, Tuple,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
@@ -1326,10 +1326,9 @@ impl BalloonConfig {
         };
 
         let statistics = parser
-            .convert::<Toggle>("statistics")
+            .convert::<NanosecTimed>("statistics")
             .map_err(Error::ParseBalloon)?
-            .unwrap_or(Toggle(false))
-            .0;
+            .map(|x| x.0);
 
         let deflate_on_oom = parser
             .convert::<Toggle>("deflate_on_oom")

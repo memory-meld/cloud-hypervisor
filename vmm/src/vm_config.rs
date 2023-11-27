@@ -4,7 +4,7 @@
 //
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
-use std::{net::Ipv4Addr, path::PathBuf};
+use std::{net::Ipv4Addr, path::PathBuf, time::Duration};
 use virtio_devices::RateLimiterConfig;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -382,7 +382,7 @@ pub struct BalloonConfig {
     pub size: [u64; 2],
     /// Option to report guest memory statistics.
     #[serde(default)]
-    pub statistics: bool,
+    pub statistics: Option<Duration>,
     /// Option to deflate the balloon in case the guest is out of memory.
     #[serde(default)]
     pub deflate_on_oom: bool,
