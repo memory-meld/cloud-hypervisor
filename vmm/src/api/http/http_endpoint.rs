@@ -182,6 +182,14 @@ impl EndpointHandler for VmActionHandler {
                     api_sender,
                     Arc::new(serde_json::from_slice(body.raw())?),
                 ),
+                // If there is a body, just ignore it.
+                Boot => vm_boot(api_notifier, api_sender),
+                Delete => vm_delete(api_notifier, api_sender),
+                Shutdown => vm_shutdown(api_notifier, api_sender),
+                Reboot => vm_reboot(api_notifier, api_sender),
+                Pause => vm_pause(api_notifier, api_sender),
+                Resume => vm_resume(api_notifier, api_sender),
+                PowerButton => vm_power_button(api_notifier, api_sender),
 
                 _ => return Err(HttpError::BadRequest),
             }
