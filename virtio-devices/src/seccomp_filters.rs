@@ -76,7 +76,10 @@ fn create_virtio_mem_ioctl_seccomp_rule() -> Vec<SeccompRule> {
 }
 
 fn virtio_balloon_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
-    vec![(libc::SYS_fallocate, vec![])]
+    vec![
+        (libc::SYS_fallocate, vec![]),
+        (libc::SYS_timerfd_settime, vec![]),
+    ]
 }
 
 fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
