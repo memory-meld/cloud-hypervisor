@@ -330,45 +330,9 @@ impl BalloonEpollHandler {
                     .read_obj(addr)
                     .map_err(Error::GuestMemory)?;
                 offset += data_chunk_size as u64;
-                match stat.tag {
-                    0 => self.counters.swap_in.store(stat.val, Ordering::Release),
-                    1 => self.counters.swap_out.store(stat.val, Ordering::Release),
-                    2 => self
-                        .counters
-                        .major_faults
-                        .store(stat.val, Ordering::Release),
-                    3 => self
-                        .counters
-                        .minor_faults
-                        .store(stat.val, Ordering::Release),
-                    4 => self.counters.free_memory.store(stat.val, Ordering::Release),
-                    5 => self
-                        .counters
-                        .total_memory
-                        .store(stat.val, Ordering::Release),
-                    6 => self
-                        .counters
-                        .available_memory
-                        .store(stat.val, Ordering::Release),
-                    7 => self.counters.disk_caches.store(stat.val, Ordering::Release),
-                    8 => self
-                        .counters
-                        .hugetlb_allocations
-                        .store(stat.val, Ordering::Release),
-                    9 => self
-                        .counters
-                        .hugetlb_failures
-                        .store(stat.val, Ordering::Release),
-                    10 => self
-                        .counters
-                        .dram_accesses
-                        .store(stat.val, Ordering::Release),
-                    11 => self
-                        .counters
-                        .pmem_accesses
-                        .store(stat.val, Ordering::Release),
-                    _ => return Err(Error::UnexpectedStatTag(stat.tag)),
-                };
+                self.counters
+                    .get(stat.tag)?
+                    .store(stat.val, Ordering::Relaxed);
             }
             self.queues[queue_index]
                 .add_used(desc_chain.memory(), desc_chain.head_index(), desc.len())
@@ -899,56 +863,17 @@ impl VirtioDevice for Balloon {
     }
 
     fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {
-        Some(HashMap::from([
-            (
-                "swap_in",
-                Wrapping(self.counters.swap_in.load(Ordering::Acquire)),
-            ),
-            (
-                "swap_out",
-                Wrapping(self.counters.swap_out.load(Ordering::Acquire)),
-            ),
-            (
-                "major_faults",
-                Wrapping(self.counters.major_faults.load(Ordering::Acquire)),
-            ),
-            (
-                "minor_faults",
-                Wrapping(self.counters.minor_faults.load(Ordering::Acquire)),
-            ),
-            (
-                "free_memory",
-                Wrapping(self.counters.free_memory.load(Ordering::Acquire)),
-            ),
-            (
-                "total_memory",
-                Wrapping(self.counters.total_memory.load(Ordering::Acquire)),
-            ),
-            (
-                "available_memory",
-                Wrapping(self.counters.available_memory.load(Ordering::Acquire)),
-            ),
-            (
-                "disk_caches",
-                Wrapping(self.counters.disk_caches.load(Ordering::Acquire)),
-            ),
-            (
-                "hugetlb_allocations",
-                Wrapping(self.counters.hugetlb_allocations.load(Ordering::Acquire)),
-            ),
-            (
-                "hugetlb_failures",
-                Wrapping(self.counters.hugetlb_failures.load(Ordering::Acquire)),
-            ),
-            (
-                "dram_accesses",
-                Wrapping(self.counters.dram_accesses.load(Ordering::Acquire)),
-            ),
-            (
-                "pmem_accesses",
-                Wrapping(self.counters.pmem_accesses.load(Ordering::Acquire)),
-            ),
-        ]))
+        Some(
+            (0..12)
+                .map(|i| {
+                    (
+                        // SAFETY: the maximum tag number is 11
+                        self.counters.name(i).unwrap(),
+                        Wrapping(self.counters.get(i).unwrap().load(Ordering::Relaxed)),
+                    )
+                })
+                .collect(),
+        )
     }
 }
 
@@ -988,4 +913,41 @@ pub struct BalloonCounters {
     hugetlb_failures: AtomicU64,
     dram_accesses: AtomicU64,
     pmem_accesses: AtomicU64,
+}
+
+impl BalloonCounters {
+    fn get(&self, tag: u16) -> result::Result<&AtomicU64, Error> {
+        Ok(match tag {
+            0 => &self.swap_in,
+            1 => &self.swap_out,
+            2 => &self.major_faults,
+            3 => &self.minor_faults,
+            4 => &self.free_memory,
+            5 => &self.total_memory,
+            6 => &self.available_memory,
+            7 => &self.disk_caches,
+            8 => &self.hugetlb_allocations,
+            9 => &self.hugetlb_failures,
+            10 => &self.dram_accesses,
+            11 => &self.pmem_accesses,
+            _ => return Err(Error::UnexpectedStatTag(tag)),
+        })
+    }
+    fn name(&self, tag: u16) -> result::Result<&'static str, Error> {
+        Ok(match tag {
+            0 => "swap_in",
+            1 => "swap_out",
+            2 => "major_faults",
+            3 => "minor_faults",
+            4 => "free_memory",
+            5 => "total_memory",
+            6 => "available_memory",
+            7 => "disk_caches",
+            8 => "hugetlb_allocations",
+            9 => "hugetlb_failures",
+            10 => "dram_accesses",
+            11 => "pmem_accesses",
+            _ => return Err(Error::UnexpectedStatTag(tag)),
+        })
+    }
 }
