@@ -676,6 +676,11 @@ impl Balloon {
         (self.config.actual as u64) << VIRTIO_BALLOON_PFN_SHIFT
     }
 
+    // Get the actual size of the virtio-balloon.
+    pub fn get_hetero_actual(&self) -> u64 {
+        (self.config.hetero_actual as u64) << VIRTIO_BALLOON_PFN_SHIFT
+    }
+
     fn state(&self) -> BalloonState {
         BalloonState {
             avail_features: self.common.avail_features,
@@ -863,17 +868,18 @@ impl VirtioDevice for Balloon {
     }
 
     fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {
-        Some(
-            (0..12)
-                .map(|i| {
-                    (
-                        // SAFETY: the maximum tag number is 11
-                        self.counters.name(i).unwrap(),
-                        Wrapping(self.counters.get(i).unwrap().load(Ordering::Relaxed)),
-                    )
-                })
-                .collect(),
-        )
+        let mut map: HashMap<_, _> = (0..12)
+            .map(|i| {
+                (
+                    // SAFETY: the maximum tag number is 11
+                    self.counters.name(i).unwrap(),
+                    Wrapping(self.counters.get(i).unwrap().load(Ordering::Relaxed)),
+                )
+            })
+            .collect();
+        map.insert("actual", Wrapping(self.get_actual()));
+        map.insert("hetero_actual", Wrapping(self.get_hetero_actual()));
+        Some(map)
     }
 }
 
