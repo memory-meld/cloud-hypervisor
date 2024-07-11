@@ -1,5 +1,5 @@
 name: Cloud Hypervisor Release
-on: [pull_request, create]
+on: [pull_request, create, workflow_dispatch]
 
 jobs:
   release:
