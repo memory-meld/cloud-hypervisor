@@ -24,6 +24,7 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::mem::size_of;
 use std::num::Wrapping;
+use std::ops::Index;
 use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -868,7 +869,7 @@ impl VirtioDevice for Balloon {
     }
 
     fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {
-        let mut map: HashMap<_, _> = (0..12)
+        let mut map: HashMap<_, _> = (0..16)
             .map(|i| {
                 (
                     // SAFETY: the maximum tag number is 11
@@ -918,7 +919,19 @@ pub struct BalloonCounters {
     hugetlb_allocations: AtomicU64,
     hugetlb_failures: AtomicU64,
     dram_accesses: AtomicU64,
+    dram_free: AtomicU64,
+    dram_total: AtomicU64,
     pmem_accesses: AtomicU64,
+    pmem_free: AtomicU64,
+    pmem_total: AtomicU64,
+}
+
+impl Index<u16> for BalloonCounters {
+    type Output = AtomicU64;
+
+    fn index(&self, index: u16) -> &Self::Output {
+        self.get(index).expect("unexpected memory statistic tag")
+    }
 }
 
 impl BalloonCounters {
@@ -935,7 +948,11 @@ impl BalloonCounters {
             8 => &self.hugetlb_allocations,
             9 => &self.hugetlb_failures,
             10 => &self.dram_accesses,
-            11 => &self.pmem_accesses,
+            11 => &self.dram_free,
+            12 => &self.dram_total,
+            13 => &self.pmem_accesses,
+            14 => &self.pmem_free,
+            15 => &self.pmem_total,
             _ => return Err(Error::UnexpectedStatTag(tag)),
         })
     }
@@ -952,7 +969,11 @@ impl BalloonCounters {
             8 => "hugetlb_allocations",
             9 => "hugetlb_failures",
             10 => "dram_accesses",
-            11 => "pmem_accesses",
+            11 => "dram_free",
+            12 => "dram_total",
+            13 => "pmem_accesses",
+            14 => "pmem_free",
+            15 => "pmem_total",
             _ => return Err(Error::UnexpectedStatTag(tag)),
         })
     }
