@@ -67,7 +67,7 @@ wait-timeout = "0.2.0"
 # Please adjust `vmm::feature_list()` accordingly when changing the
 # feature list below
 [features]
-default = ["kvm", "io_uring"]
+default = ["kvm", "io_uring", "guest_debug"]
 dbus_api = ["zbus", "vmm/dbus_api"]
 dhat-heap = ["dhat"] # For heap profiling
 guest_debug = ["vmm/guest_debug"]
