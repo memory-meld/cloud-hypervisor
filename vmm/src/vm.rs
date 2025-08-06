@@ -2219,20 +2219,17 @@ impl Vm {
     }
 
     pub fn hmem_collect_access_samples(&mut self) -> std::result::Result<(), MigratableError> {
-        let begin = unsafe { core::arch::x86_64::_rdtsc() };
+        let begin = std::time::Instant::now();
         let table = self.memory_manager.lock().unwrap().dirty_log()?;
-        let huge_page_size = 2 << 20;
-        let gpas: Vec<_> = table
+        let len: u64 = table
             .regions()
             .iter()
-            .flat_map(|&MemoryRange { gpa, length }| {
-                let aligned = (gpa / huge_page_size) * huge_page_size;
-                (aligned..(aligned + length)).step_by(huge_page_size as _)
+            .map(|&MemoryRange { gpa: _, length }| {
+                length
             })
-            .collect();
-        let count = gpas.len();
-        let cost = unsafe { core::arch::x86_64::_rdtsc() } - begin;
-        warn!("sample collected {count} cost {cost}");
+            .sum();
+        let cost = std::time::Instant::now().duration_since(begin);
+        warn!("modified length {len} byte(s) extraction cost {cost:?}");
 
         Ok(())
     }
